@@ -31,6 +31,9 @@ export type AiWeights = {
   hiddenPiecePressureBonus: number;
   importantHiddenPiecePressureBonus: number;
   hiddenPiecePressureMaxBonus: number;
+  hiddenExpectedValue: number;
+  hiddenRookCannonActivityBonus: number;
+  hiddenMinorActivityPenalty: number;
   kingZoneNearBonus: number;
   kingZoneLineBonus: number;
   effectiveCheckBonus: number;
@@ -159,6 +162,8 @@ export type AiWeights = {
   cannonPalaceRestrictionBonus: number;
   kingJoinAttackBonus: number;
   lowValueMateNetSupportBonus: number;
+  unsafeMaterialCheckPenalty: number;
+  createsMateThreatBonus: number;
 };
 
 export const defaultAiWeights: AiWeights = {
@@ -200,6 +205,9 @@ export const defaultAiWeights: AiWeights = {
   hiddenPiecePressureBonus: 8,
   importantHiddenPiecePressureBonus: 4,
   hiddenPiecePressureMaxBonus: 32,
+  hiddenExpectedValue: 180,
+  hiddenRookCannonActivityBonus: 40,
+  hiddenMinorActivityPenalty: -25,
   kingZoneNearBonus: 25,
   kingZoneLineBonus: 15,
   effectiveCheckBonus: 35,
@@ -328,4 +336,6 @@ export const defaultAiWeights: AiWeights = {
   cannonPalaceRestrictionBonus: 70,
   kingJoinAttackBonus: 50,
   lowValueMateNetSupportBonus: 45,
+  unsafeMaterialCheckPenalty: -260,
+  createsMateThreatBonus: 90,
 };

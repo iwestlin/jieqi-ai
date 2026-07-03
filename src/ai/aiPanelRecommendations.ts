@@ -35,6 +35,7 @@ export function buildAiPanelDebugReport(input: {
     state: input.state,
     analysisMoves: input.analysisMoves,
     recommendation: input.fair,
+    showHiddenCaptureRealType: false,
   });
   const oracleMove = input.oracle.move ? moveText(input.oracle.move) : 'no move';
   const oracleBlock = [

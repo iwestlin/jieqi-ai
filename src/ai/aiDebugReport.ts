@@ -1,6 +1,6 @@
 import type { GameState, Move } from '../types/chess';
 import type { AiMoveTrace, AiRecommendation } from './aiTrace';
-import { moveText } from '../game/moveNotation';
+import { moveText as rawMoveText } from '../game/moveNotation';
 import { pieceTypeName } from '../game/pieceText';
 
 /** Context passed into formatAiDebugReport. */
@@ -10,6 +10,7 @@ export type AiDebugReportInput = {
   /** Extra moves from analysis variation (optional). */
   analysisMoves?: Move[];
   recommendation: AiRecommendation;
+  showHiddenCaptureRealType?: boolean;
 };
 
 function bool(v: boolean | undefined | null): string {
@@ -20,6 +21,10 @@ function bool(v: boolean | undefined | null): string {
 function num(v: number | undefined | null): string {
   if (v === undefined || v === null) return '-';
   return String(v);
+}
+
+function moveText(move: Move): string {
+  return rawMoveText(move, { showHiddenCaptureRealType: false });
 }
 
 function fmtTrace(t: AiMoveTrace): string {
@@ -144,6 +149,10 @@ function fmtTrace(t: AiMoveTrace): string {
     '  kingJoinAttack: ' + bool(t.kingJoinAttack),
     '  lowValuePieceSupportsMateNet: ' + bool(t.lowValuePieceSupportsMateNet),
     '  mateNetPotential: ' + bool(t.mateNetPotential),
+    '  unsafeMaterialCheck: ' + bool(t.unsafeMaterialCheck),
+    '  unsafeMaterialCheckPenalty: ' + num(t.unsafeMaterialCheckPenalty),
+    '  createsMateThreat: ' + bool(t.createsMateThreat),
+    '  createsMateThreatScore: ' + num(t.createsMateThreatScore),
   ];
   return lines.join('\n');
 }

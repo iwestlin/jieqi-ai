@@ -182,6 +182,10 @@ type MoveEvaluation = {
   kingJoinAttack: boolean;
   lowValuePieceSupportsMateNet: boolean;
   mateNetPotential: boolean;
+  unsafeMaterialCheck: boolean;
+  unsafeMaterialCheckPenalty: number;
+  createsMateThreat: boolean;
+  createsMateThreatScore: number;
 };
 
 type AiThreatInfo = {
@@ -465,41 +469,23 @@ function pieceValue(piece: Piece, weights: AiWeights): number {
 }
 
 function movedPieceValue(piece: Piece, weights: AiWeights): number {
-  return weights.pieceValues[piece.realType];
+  return piece.revealed
+    ? weights.pieceValues[piece.realType]
+    : hiddenPieceValue(piece, weights);
 }
 
-function countRevealedSameType(board: Board, side: Side, type: PieceType): number {
-  return board.reduce((count, row) => count + row.filter(piece =>
-    piece?.side === side &&
-    piece.revealed &&
-    piece.realType === type
-  ).length, 0);
-}
+function hiddenPieceValue(piece: Piece, weights: AiWeights): number {
+  if (piece.revealed) return weights.pieceValues[piece.realType];
 
-function hiddenPieceValue(piece: Piece, board: Board, weights: AiWeights): number {
-  if (piece.revealed) return movedPieceValue(piece, weights);
-
-  const revealedCount = Math.min(2, countRevealedSameType(board, piece.side, piece.realType));
-  if (piece.realType === 'rook') {
-    if (revealedCount === 0) return weights.hiddenRookValueNoRevealed;
-    if (revealedCount === 1) return weights.hiddenRookValueOneRevealed;
-    return weights.hiddenRookValueTwoRevealed;
-  }
-  if (piece.realType === 'cannon') {
-    if (revealedCount === 0) return weights.hiddenCannonValueNoRevealed;
-    if (revealedCount === 1) return weights.hiddenCannonValueOneRevealed;
-    return weights.hiddenCannonValueTwoRevealed;
-  }
-  if (piece.realType === 'horse') {
-    if (revealedCount === 0) return weights.hiddenHorseValueNoRevealed;
-    if (revealedCount === 1) return weights.hiddenHorseValueOneRevealed;
-    return weights.hiddenHorseValueTwoRevealed;
-  }
-  return Math.round(movedPieceValue(piece, weights) * 0.65);
+  const activity =
+    piece.originalType === 'rook' || piece.originalType === 'cannon'
+      ? weights.hiddenRookCannonActivityBonus
+      : weights.hiddenMinorActivityPenalty;
+  return weights.hiddenExpectedValue + activity;
 }
 
 function defensiveTargetValue(piece: Piece, board: Board, position: Position, weights: AiWeights): number {
-  return piece.revealed ? targetValue(piece, board, position, weights) : hiddenPieceValue(piece, board, weights);
+  return piece.revealed ? targetValue(piece, board, position, weights) : hiddenPieceValue(piece, weights);
 }
 
 function opponent(side: Side): Side {
@@ -511,13 +497,13 @@ function winningStatus(side: Side): GameState['status'] {
 }
 
 function isConnectedAdvisor(piece: Piece, board: Board, position: Position, weights: AiWeights): boolean {
-  if (publicType(piece) !== 'advisor') return false;
+  if (!piece.revealed || piece.realType !== 'advisor') return false;
 
   for (let row = 0; row < board.length; row++) {
     for (let col = 0; col < board[row].length; col++) {
       if (row === position.row && col === position.col) continue;
       const other = board[row][col];
-      if (!other || other.side !== piece.side || publicType(other) !== 'advisor') continue;
+      if (!other || other.side !== piece.side || !other.revealed || other.realType !== 'advisor') continue;
       const distance = Math.abs(row - position.row) + Math.abs(col - position.col);
       if (distance <= weights.connectedAdvisorDistance) return true;
     }
@@ -838,6 +824,18 @@ function opponentHasImmediateWin(board: Board, side: Side): boolean {
   );
 }
 
+function opponentHasSimpleCheckResponse(nextState: GameState): boolean {
+  if (nextState.status !== 'playing') return false;
+  return getAllLegalMoves(nextState.board, nextState.turn).length > 0;
+}
+
+function createsImmediateMateThreat(board: Board, side: Side): boolean {
+  const fakeState: GameState = { board, turn: side, history: [], status: 'playing' };
+  return getAllLegalMoves(board, side).some(move =>
+    applyMove(fakeState, move.from, move.to).status === winningStatus(side)
+  );
+}
+
 function opponentKingPosition(board: Board, side: Side): Position | null {
   const enemy = opponent(side);
   for (let row = 0; row < board.length; row++) {
@@ -938,11 +936,11 @@ function isInitialBackRankPiece(piece: Piece, position: Position, type: PieceTyp
 }
 
 function isHiddenMajor(piece: Piece | null): piece is Piece {
-  return !!piece && !piece.revealed && (piece.realType === 'rook' || piece.realType === 'cannon' || piece.realType === 'horse');
+  return !!piece && !piece.revealed && (piece.originalType === 'rook' || piece.originalType === 'cannon' || piece.originalType === 'horse');
 }
 
 function isHiddenCannon(piece: Piece | null): piece is Piece {
-  return !!piece && !piece.revealed && piece.realType === 'cannon';
+  return !!piece && !piece.revealed && piece.originalType === 'cannon';
 }
 
 function isReleasedHorseMove(move: Move): boolean {
@@ -1040,7 +1038,7 @@ function guardsPawnLineKeyPoint(side: Side, position: Position): boolean {
 function hasHiddenRookGuardPoint(board: Board, side: Side, position: Position): boolean {
   const guardRow = ownPawnLineRow(side) + forwardDirection(side);
   if (position.row !== guardRow) return false;
-  return board.some(row => row.some(piece => piece?.side === side && !piece.revealed && piece.realType === 'rook'));
+  return board.some(row => row.some(piece => piece?.side === side && !piece.revealed && piece.originalType === 'rook'));
 }
 
 function enemyRookOnPawnLineRisk(board: Board, side: Side): number {
@@ -1232,14 +1230,7 @@ function structurePatternEvaluation(state: GameState, move: Move, nextBoard: Boa
  */
 function publicHiddenReplyThreatValue(piece: Piece, weights: AiWeights): number {
   if (piece.revealed) return weights.pieceValues[piece.realType];
-  const type = piece.originalType;
-  if (type === 'rook') return weights.pieceValues.rook;
-  if (type === 'cannon') return weights.targetCannonValue;
-  if (type === 'horse') return weights.pieceValues.horse;
-  if (type === 'advisor') return weights.advisorTargetValue;
-  if (type === 'elephant') return weights.elephantTargetValue;
-  if (type === 'pawn') return weights.uncrossedPawnTargetValue;
-  return weights.pieceValues[type];
+  return hiddenPieceValue(piece, weights);
 }
 
 /**
@@ -1282,8 +1273,9 @@ function computeRevealChoiceRisk(
     maxHiddenThreat = Math.max(maxHiddenThreat, replyEst);
   }
 
-  // 只有對方有高價值棋子看住落點才觸發
-  if (maxHiddenThreat < weights.pieceValues.horse) return { isRisk: false, penalty: 0 };
+  // 只有對方有高活動外觀暗子看住落點才觸發。
+  // Fair AI 使用暗子期望值與 originalType 活動修正，不讀 unrevealed realType。
+  if (maxHiddenThreat < weights.hiddenExpectedValue + weights.hiddenRookCannonActivityBonus) return { isRisk: false, penalty: 0 };
 
   // 扣分：車吃重扣，炮/馬吃中扣
   const isRookMover = moverPubType === 'rook';
@@ -1750,6 +1742,7 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
   const hiddenRevealMateDefensePenalty = hiddenRevealMateDefense
     ? weights.unsafeCapturePenalty
     : 0;
+  const exchangeNet = captureGain - reply.possibleLoss;
 
   const effectiveCheck = checking && (
     captureGain > 0 ||
@@ -1768,9 +1761,18 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
   // Exclude the king itself as an "important threat" target: being in check already
   // means the king is under capture threat, so that alone must not count as
   // materialCheck (otherwise every single check would trivially qualify).
-  const materialCheck = checking && (captureGain > 0 || (importantThreat && afterThreat?.targetType !== 'king'));
-  const forcesBadKingMove = checking && !materialCheck && oppKingMovesAfter <= 1;
-  const checkRestrictsKingMobility = checking && !materialCheck && !forcesBadKingMove &&
+  const rawMaterialCheck = checking && (captureGain > 0 || (importantThreat && afterThreat?.targetType !== 'king'));
+  const unsafeMaterialCheck =
+    rawMaterialCheck &&
+    !!move.captured &&
+    exchangeNet < 0 &&
+    reply.risk >= Math.max(weights.pieceValues.horse, captureGain) &&
+    opponentHasSimpleCheckResponse(next) &&
+    next.status !== winningStatus(state.turn) &&
+    !blocksImmediateWin;
+  const materialCheck = rawMaterialCheck && !unsafeMaterialCheck;
+  const forcesBadKingMove = checking && !unsafeMaterialCheck && !materialCheck && oppKingMovesAfter <= 1;
+  const checkRestrictsKingMobility = checking && !unsafeMaterialCheck && !materialCheck && !forcesBadKingMove &&
     oppKingMovesAfter < oppKingMovesBefore;
   const meaninglessCheck = checking && !materialCheck && !forcesBadKingMove && !checkRestrictsKingMobility;
   const checkingQuality: 'none' | 'mate' | 'forcedMateThreat' | 'materialCheck' | 'forcesBadKingMove' | 'restrictsKingMobility' | 'meaninglessCheck' =
@@ -1785,6 +1787,7 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     : forcesBadKingMove ? weights.forcesBadKingMoveBonus
     : checkRestrictsKingMobility ? weights.checkRestrictsKingMobilityBonus
     : weights.meaninglessCheckPenalty;
+  const unsafeMaterialCheckPenalty = unsafeMaterialCheck ? weights.unsafeMaterialCheckPenalty : 0;
 
   // Task 5: Dynamic piece values
   const dynamicValuePhase = computeGamePhase(state, nextBoard, weights);
@@ -1824,8 +1827,7 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     }
   }
 
-  const exchangeNet = captureGain - reply.possibleLoss;
-  const hasClearGain = captureGain >= weights.pieceValues.cannon || blocksImmediateWin || effectiveCheck || (captureGain > 0 && exchangeNet >= 0) || escapeBonus > 0;
+  const hasClearGain = captureGain >= weights.pieceValues.cannon || blocksImmediateWin || (effectiveCheck && !unsafeMaterialCheck) || (captureGain > 0 && exchangeNet >= 0) || escapeBonus > 0;
   const leaveKeySquareScore = leaveKeySquarePenalty(state.board, state.turn, move.from, move.to, hasClearGain, weights);
   const structure = structurePatternEvaluation(state, move, nextBoard, hasClearGain, weights);
   // Edge cannon pressure: cap hiddenPressureScore for plain pawn moves that don't resolve pressure
@@ -1933,7 +1935,8 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
   const pawnSoldierWalksIntoRevealedPawnAttack = isUnrevealedPawnMove &&
     captureGain === 0 &&
     !blocksImmediateWin &&
-    isSquareAttackedByRevealedPawn(nextBoard, opponent(state.turn), move.to);
+    isSquareAttackedByRevealedPawn(nextBoard, opponent(state.turn), move.to) &&
+    !pawnSoldierProtectedAfterAdvance;
   const pawnSoldierSelfSacrifice =
     pawnSoldierWalksIntoRevealedPawnAttack &&
     !pawnSoldierProtectedAfterAdvance;
@@ -2059,7 +2062,7 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
 
   const forcingReply =
     blocksImmediateWin ||
-    effectiveCheck ||
+    (effectiveCheck && !unsafeMaterialCheck) ||
     structure.releasedHorseFromPressure ||
     structure.releasedElephantFromPressure ||
     structure.preventsPawnLineLock;
@@ -2109,6 +2112,11 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     state, move, nextBoard, checking, importantThreat, captureGain,
     blocksImmediateWin, rescuesLooseHiddenPiece, weights
   );
+  const createsMateThreat =
+    !checking &&
+    next.status === 'playing' &&
+    createsImmediateMateThreat(nextBoard, state.turn);
+  const createsMateThreatScore = createsMateThreat ? weights.createsMateThreatBonus : 0;
 
   // Safety Gate: 安全門 — 明大子受威脅時的優先決策層
   const highValuePieceInDanger = preHighValueThreats.length > 0;
@@ -2259,7 +2267,7 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
   const forcingMoveRealProgress = forcingMove && (
     blocksImmediateWin ||
     (captureGain > 0 && exchangeNet >= 0) ||
-    (checkingQuality !== 'none' && checkingQuality !== 'meaninglessCheck') ||
+    (!unsafeMaterialCheck && checkingQuality !== 'none' && checkingQuality !== 'meaninglessCheck') ||
     resolvedHighValueThreat ||
     multiPurposeDefense ||
     endgamePlan.restrictKingMobility
@@ -2361,6 +2369,8 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     partialDefensePenaltyScore +
     unresolvedThreatAfterDefensePenaltyScore +
     checkingQualityScore +
+    unsafeMaterialCheckPenalty +
+    createsMateThreatScore +
     dynamicMoverValue +
     dynamicTargetValue +
     productiveForcingMoveBonusApplied +
@@ -2536,6 +2546,10 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     kingJoinAttack: palaceThreatMap.kingJoinAttack,
     lowValuePieceSupportsMateNet: palaceThreatMap.lowValuePieceSupportsMateNet,
     mateNetPotential: palaceThreatMap.mateNetPotential,
+    unsafeMaterialCheck,
+    unsafeMaterialCheckPenalty,
+    createsMateThreat,
+    createsMateThreatScore,
   };
 }
 
@@ -2556,8 +2570,10 @@ function reasonFor(best: Move, evaluation: MoveEvaluation, avoidedOpponentWin: b
   if (evaluation.loopBreakingMove) return '破循環：放棄無成果追擊，改為翻新子 / 改善低價子 / 九宮壓迫 / 改攻另一翼';
   if (evaluation.mutualChaseLoop || evaluation.forcingCycle) return '追逃循環：雙方來回追逃，局面沒有改變';
   if (evaluation.repetitiveForcingMove) return '重複強制步：近期多次無吃子強制步，已降分';
+  if (evaluation.unsafeMaterialCheck) return '吃子將軍但交換虧損，對方可簡單解將，已重扣';
   if (evaluation.unproductiveForcingMove) return '無成果強制步：對方有簡單回應，未取得實質進展';
   if (evaluation.forcingMove && evaluation.forcingMoveQuality === 'productive') return '有效強制步：取得實質進展';
+  if (evaluation.createsMateThreat) return '形成下一手叫殺';
   if (evaluation.cannonPalaceRestriction) return '九宮壓迫：限制敵方將帥逃格';
   if (evaluation.rescuesLooseHiddenPiece) return '暗子無保護受攻擊，優先脫離';
   if (evaluation.postMoveLooseHiddenPiece && evaluation.postMoveLoosePiecePenalty < 0) return '下完仍有無保護暗子被抓，已扣分';
@@ -2911,6 +2927,10 @@ export function recommendMove(
     kingJoinAttack: evaluation.kingJoinAttack,
     lowValuePieceSupportsMateNet: evaluation.lowValuePieceSupportsMateNet,
     mateNetPotential: evaluation.mateNetPotential,
+    unsafeMaterialCheck: evaluation.unsafeMaterialCheck,
+    unsafeMaterialCheckPenalty: evaluation.unsafeMaterialCheckPenalty,
+    createsMateThreat: evaluation.createsMateThreat,
+    createsMateThreatScore: evaluation.createsMateThreatScore,
   }));
 
   return {

@@ -51,7 +51,7 @@ export function AiPanel({ state, version: _version, modeName, analysisMoves }: P
       <p className="aiDisclaimer">{SIMPLE_AI_NOTE}</p>
       {r.move ? (
         <>
-          <p>{moveText(r.move)}</p>
+          <p>{moveText(r.move, { showHiddenCaptureRealType: false })}</p>
           <p>分數：{r.score}</p>
           <p>{r.reason}</p>
         </>

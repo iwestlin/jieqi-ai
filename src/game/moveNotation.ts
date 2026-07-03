@@ -1,6 +1,10 @@
 import type { Move, Piece, PieceType, Side } from '../types/chess';
 import { pieceTypeName, realPieceName, sideNames } from './pieceText';
 
+export type MoveTextOptions = {
+  showHiddenCaptureRealType?: boolean;
+};
+
 const redNumerals = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
 const blackNumerals = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
@@ -31,10 +35,13 @@ function actionText(piece: Piece, move: Move): string {
   return `${action}${value}`;
 }
 
-export function captureText(move: Move): string {
+export function captureText(move: Move, options: MoveTextOptions = {}): string {
   if (!move.captured) return '';
 
   const capturedSide = sideNames[move.captured.side];
+  if ((move.captureKind === 'hidden' || move.capturedWasHidden) && options.showHiddenCaptureRealType === false) {
+    return `（吃${capturedSide}暗${pieceTypeName(move.captured.side, move.captured.originalType)}）`;
+  }
   const capturedName = realPieceName(move.captured);
   if (move.captureKind === 'hidden' || move.capturedWasHidden) {
     return `，吃${capturedSide}暗子（翻出${capturedName}）`;
@@ -42,11 +49,11 @@ export function captureText(move: Move): string {
   return `，吃${capturedSide}${capturedName}`;
 }
 
-export function moveText(move: Move): string {
+export function moveText(move: Move, options: MoveTextOptions = {}): string {
   const piece = move.piece;
   const type = typeForNotation(piece);
   const hiddenPrefix = piece.revealed ? '' : '暗';
   const prefix = move.notationPrefix ?? '';
   const fromFile = prefix ? '' : fileNumber(piece.side, move.from.col);
-  return `${hiddenPrefix}${prefix}${pieceTypeName(piece.side, type)}${fromFile}${actionText(piece, move)}${captureText(move)}`;
+  return `${hiddenPrefix}${prefix}${pieceTypeName(piece.side, type)}${fromFile}${actionText(piece, move)}${captureText(move, options)}`;
 }

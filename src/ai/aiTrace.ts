@@ -156,6 +156,10 @@ export type AiMoveTrace = {
   kingJoinAttack?: boolean;
   lowValuePieceSupportsMateNet?: boolean;
   mateNetPotential?: boolean;
+  unsafeMaterialCheck?: boolean;
+  unsafeMaterialCheckPenalty?: number;
+  createsMateThreat?: boolean;
+  createsMateThreatScore?: number;
 };
 
 /**

@@ -1254,7 +1254,7 @@ test('AI splits red edge cannon pressure from pawn line guard pattern', () => {
   assertEqual(recommended.move === hiddenCannonSideShift, false);
 });
 
-test('AI keeps rook pressure trace but prioritizes pawn soldier over pure horse in early opening', () => {
+test('AI keeps rook pressure trace and can prioritize horse guard over ordinary pawn soldier', () => {
   const board = emptyBoard();
   place(board, 9, 4, piece('red', 'king'));
   place(board, 0, 4, piece('black', 'king'));
@@ -1275,10 +1275,11 @@ test('AI keeps rook pressure trace but prioritizes pawn soldier over pure horse 
   ]);
 
   assertOk(recommended.move);
-  assertEqual(recommended.move, sameFilePawnGamble);
+  assertEqual(recommended.move, horseReleaseToGuard);
   assertOk(recommended.traces);
   const guardTrace = recommended.traces.find(t => t.move === horseReleaseToGuard);
   assertOk(guardTrace);
+  assertEqual(guardTrace.horsePawnLineGuard, true);
   assertEqual(guardTrace.patterns.some(p =>
     p === 'opening_edge_rook_pawn_line_lock' ||
     p === 'horse_release_to_guard_pawn_line'
