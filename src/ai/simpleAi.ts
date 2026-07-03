@@ -522,6 +522,8 @@ function isNearEnemyPalace(piece: Piece, position: Position): boolean {
 }
 
 function targetValue(piece: Piece, board: Board, position: Position, weights: AiWeights): number {
+  if (!piece.revealed) return hiddenPieceValue(piece, weights);
+
   const type = publicType(piece);
   if (type === 'king') return weights.pieceValues.king;
   if (type === 'rook') return weights.pieceValues.rook;
@@ -2224,9 +2226,12 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
   // 直接吃掉敵方大子本身就是一種「攻擊大子」——不必等afterThreat才算forcingMove。
   const capturedPieceForForcing = move.captured ?? null;
   const capturedMajorValue = capturedPieceForForcing
-    ? weights.pieceValues[publicType(capturedPieceForForcing)]
+    ? targetValue(capturedPieceForForcing, state.board, move.to, weights)
     : 0;
-  const directMajorCapture = !!capturedPieceForForcing && capturedMajorValue >= weights.pieceValues.horse;
+  const directMajorCapture =
+    !!capturedPieceForForcing &&
+    capturedPieceForForcing.revealed &&
+    capturedMajorValue >= weights.pieceValues.horse;
   const forcingCaptureMajor = directMajorCapture || (importantThreat && !!afterThreat);
   const forcingMove = checking || forcingCaptureMajor;
   let forcingTargetKind: 'king' | 'major' | 'hiddenMajor' | null = null;
@@ -2788,6 +2793,8 @@ export function recommendMove(
     exchangeNet: evaluation.exchangeNet,
     risk: evaluation.risk,
     captureGain: evaluation.captureGain,
+    capturedConnectedAdvisor: evaluation.capturedConnectedAdvisor,
+    capturedCrossedPawn: evaluation.capturedCrossedPawn,
     openingBonus: evaluation.openingBonus,
     keySquareScore: evaluation.keySquareScore,
     hiddenPressureScore: evaluation.hiddenPressureScore,

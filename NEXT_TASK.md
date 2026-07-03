@@ -2,6 +2,10 @@
 
 ## Completed This Round
 
+- Fixed the `targetValue()` hidden-capture leak from commit `e9dae70`.
+- Hidden captured pieces now use expected value before any piece-specific target valuation.
+- Hidden rook/cannon/horse appearances no longer count as definite `directMajorCapture` forcing targets.
+- Added hidden-capture value regression tests.
 - Fair AI hidden-piece evaluation no longer reads unrevealed `realType`.
 - Unrevealed pieces now use fixed expected value plus public `originalType` activity modifiers.
 - Hidden advisors no longer trigger connected-advisor value.

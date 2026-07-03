@@ -14,6 +14,8 @@ export type AiMoveTrace = {
   exchangeNet: number;
   risk: number;
   captureGain: number;
+  capturedConnectedAdvisor?: boolean;
+  capturedCrossedPawn?: boolean;
   openingBonus: number;
   keySquareScore: number;
   hiddenPressureScore: number;

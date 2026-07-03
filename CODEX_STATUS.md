@@ -2,6 +2,12 @@
 
 ## Latest Completed Work
 
+- Fixed the remaining hidden-capture valuation leak from commit `e9dae70`.
+- `targetValue()` now returns `hiddenPieceValue()` immediately for unrevealed captured pieces.
+- Capture gain for hidden advisor/horse/minor appearances now uses the same expected hidden value.
+- Hidden rook/cannon appearances keep only the explicit public activity modifier, not full material value.
+- `directMajorCapture` now requires the captured piece to be revealed; hidden rook/cannon/horse appearances are not treated as definite major captures.
+- Added focused hidden-capture regression tests in `tests/fair_hidden_values.test.ts`.
 - Fixed Fair AI hidden-piece evaluation so unrevealed pieces are not valued from `realType`.
 - Added MVP hidden-piece expected value:
   - base `hiddenExpectedValue`
@@ -36,10 +42,14 @@
   - Added optional safe notation for hidden captures.
 - `tests/rules.test.ts`
   - Updated the edge-rook pressure regression to allow a real pawn-line horse guard over ordinary pawn development.
+- `tests/fair_hidden_values.test.ts`
+  - Verifies hidden advisor/horse expected capture value, hidden advisor connected-advisor exclusion, and hidden rook non-major forcing behavior.
+- `package.json`
+  - Runs the new hidden-value regression test after the existing rules test.
 
 ## Verification
 
-- `npm test`: passed.
+- `npm test`: passed after the hidden-capture regression update.
 - `npx tsc --noEmit`: passed.
 - `npm run build`: passed.
 
