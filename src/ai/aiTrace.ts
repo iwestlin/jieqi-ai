@@ -36,6 +36,12 @@ export type AiMoveTrace = {
   edgeCannonPressureUnresolved: boolean;
   speculativeAttack: boolean;
   safeCapturePriority: boolean;
+  highRiskNeutralExchange?: boolean;
+  highRiskNeutralExchangePenalty?: number;
+  hiddenMoverExpectedValue?: number;
+  hiddenMoverLowValueLoss?: number;
+  hiddenMoverLowValueCapture?: boolean;
+  hiddenMoverLowValueCapturePenalty?: number;
   prematureHiddenMajorLowHiddenCapture?: boolean;
   prematureHiddenMajorLowHiddenCapturePenalty?: number;
   repetitiveCheck: boolean;
@@ -81,8 +87,11 @@ export type AiMoveTrace = {
   deadMajorShouldCaptureNow?: boolean;
   deadMajorHoldSuppressedBySafeCapture?: boolean;
   pawnSoldierWalksIntoRevealedPawnAttack?: boolean;
+  pawnSoldierSacrificeHasTacticalJustification?: boolean;
   pawnSoldierSelfSacrifice?: boolean;
   pawnSoldierProtectedAfterAdvance?: boolean;
+  pawnSoldierWalksIntoPawnAttackPenalty?: number;
+  pawnSoldierDevelopmentScore?: number;
   pawnSoldierDevelopmentSuppressedByPawnAttack?: boolean;
   repeatedCheckingCycle?: boolean;
   repeatedPositionRisk?: boolean;

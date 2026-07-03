@@ -61,6 +61,12 @@ type MoveEvaluation = {
   edgeCannonPressureUnresolved: boolean;
   speculativeAttack: boolean;
   safeCapturePriority: boolean;
+  highRiskNeutralExchange: boolean;
+  highRiskNeutralExchangePenalty: number;
+  hiddenMoverExpectedValue: number;
+  hiddenMoverLowValueLoss: number;
+  hiddenMoverLowValueCapture: boolean;
+  hiddenMoverLowValueCapturePenalty: number;
   prematureHiddenMajorLowHiddenCapture: boolean;
   prematureHiddenMajorLowHiddenCapturePenalty: number;
   repetitiveCheck: boolean;
@@ -106,8 +112,11 @@ type MoveEvaluation = {
   deadMajorShouldCaptureNow: boolean;
   deadMajorHoldSuppressedBySafeCapture: boolean;
   pawnSoldierWalksIntoRevealedPawnAttack: boolean;
+  pawnSoldierSacrificeHasTacticalJustification: boolean;
   pawnSoldierSelfSacrifice: boolean;
   pawnSoldierProtectedAfterAdvance: boolean;
+  pawnSoldierWalksIntoPawnAttackPenalty: number;
+  pawnSoldierDevelopmentScore: number;
   pawnSoldierDevelopmentSuppressedByPawnAttack: boolean;
   repeatedCheckingCycle: boolean;
   repeatedCheckingCyclePenaltyScore: number;
@@ -1720,7 +1729,7 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     pawnSoldierThreatensRevealedMajor &&
     !pawnSoldierFeedsRevealedMajor;
   const pawnSoldierFollowUp = pawnSoldierFollowUpEvaluation(state.board, state.turn, move, weights);
-  const pawnSoldierDevelopmentScore = pawnSoldierDevelopment ? weights.pawnSoldierDevelopmentBonus : 0;
+  const rawPawnSoldierDevelopmentScore = pawnSoldierDevelopment ? weights.pawnSoldierDevelopmentBonus : 0;
   const pawnSoldierThreatRevealedMajorScore = pawnSoldierThreatRevealedMajor
     ? weights.pawnSoldierThreatRevealedMajorBonus
     : 0;
@@ -1745,6 +1754,19 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     ? weights.unsafeCapturePenalty
     : 0;
   const exchangeNet = captureGain - reply.possibleLoss;
+  const hiddenMoverExpectedValue = moveRevealsUnknown
+    ? hiddenPieceValue(move.piece, weights)
+    : movedPieceValue(move.piece, weights);
+  const hiddenMoverLowValueLoss = hiddenMoverExpectedValue - captureGain;
+  const hiddenMoverLowValueCapture =
+    moveRevealsUnknown &&
+    captureGain > 0 &&
+    hiddenMoverLowValueLoss >= weights.hiddenMoverLowValueThreshold &&
+    !blocksImmediateWin &&
+    next.status !== winningStatus(state.turn);
+  const hiddenMoverLowValueCapturePenalty = hiddenMoverLowValueCapture
+    ? weights.hiddenMoverLowValueCapturePenalty
+    : 0;
 
   const effectiveCheck = checking && (
     captureGain > 0 ||
@@ -1868,11 +1890,6 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     ? weights.unsafeCapturePenalty
     : 0;
 
-  // Safe capture priority: boost definite captures over speculative pressure.
-  // 但高價暗子主動吃低外觀暗子不算「確定安全吃子」。
-  const safeCapturePriority = captureGain > 0 && exchangeNet >= 0 && !prematureHiddenMajorLowHiddenCapture;
-  const safeCapturePriorityBonus = safeCapturePriority ? weights.safeCapturePriorityBonus : 0;
-
   // Speculative hidden cannon attack: penalize unrevealed cannon threatening unrevealed target (no capture)
   const speculativeAttack = !move.piece.revealed && move.piece.originalType === 'cannon' &&
     captureGain === 0 && (afterThreat?.byMovedPiece ?? false) && !(afterThreat?.targetRevealed ?? true);
@@ -1915,11 +1932,58 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     !!move.captured && publicType(move.captured) === 'rook' &&
     controlledDeadMajorPositions.some(p => p.row === move.to.row && p.col === move.to.col);
 
+  // 暗兵卒走入已翻兵卒攻擊（白送）—— 不限開局階段
+  const isUnrevealedPawnMove = isUnrevealedPawnSoldier(move.piece);
+  const pawnSoldierProtectedAfterAdvance = isUnrevealedPawnMove &&
+    isSquareProtectedBySide(nextBoard, state.turn, move.to);
+  const pawnSoldierWalksIntoRevealedPawnAttack = isUnrevealedPawnMove &&
+    captureGain === 0 &&
+    isSquareAttackedByRevealedPawn(nextBoard, opponent(state.turn), move.to);
+  const createsVerifiedForcedMate = false;
+  const pawnSoldierSacrificeHasTacticalJustification =
+    blocksImmediateWin ||
+    next.status === winningStatus(state.turn) ||
+    createsVerifiedForcedMate;
+  const pawnSoldierSelfSacrifice =
+    pawnSoldierWalksIntoRevealedPawnAttack &&
+    !pawnSoldierSacrificeHasTacticalJustification;
+  const pawnSoldierDevelopmentSuppressedByPawnAttack = pawnSoldierSelfSacrifice;
+  const pawnSoldierWalksIntoPawnAttackPenalty = pawnSoldierSelfSacrifice
+    ? weights.pawnSoldierWalksIntoRevealedPawnAttackPenalty
+    : 0;
+  const pawnSoldierDevelopmentSuppressedByPawnAttackPenalty = pawnSoldierDevelopmentSuppressedByPawnAttack
+    ? weights.pawnSoldierDevelopmentSuppressedByPawnAttackPenalty
+    : 0;
+  const pawnSoldierDevelopmentScore = pawnSoldierSelfSacrifice ? 0 : rawPawnSoldierDevelopmentScore;
+  const finalOpeningBonus = pawnSoldierSelfSacrifice ? 0 : openingBonus;
+  // 暗大子回吃風險
+  const hiddenMajorRecaptureRisk = captureGain > 0 &&
+    !blocksImmediateWin &&
+    !effectiveCheck &&
+    hiddenMajorCanRecaptureAt(nextBoard, opponent(state.turn), move.to);
+  const highRiskNeutralExchange =
+    hiddenMajorRecaptureRisk &&
+    exchangeNet <= 0 &&
+    reply.risk >= weights.highRiskExchangeThreshold &&
+    !blocksImmediateWin &&
+    next.status !== winningStatus(state.turn);
+  const highRiskNeutralExchangePenalty = highRiskNeutralExchange
+    ? weights.highRiskNeutralExchangePenalty
+    : 0;
+  // Safe capture priority: only net-positive, non-speculative captures are treated as safe.
+  const safeCapturePriority =
+    captureGain > 0 &&
+    exchangeNet > 0 &&
+    !highRiskNeutralExchange &&
+    !hiddenMoverLowValueCapture &&
+    !prematureHiddenMajorLowHiddenCapture;
+  const safeCapturePriorityBonus = safeCapturePriority ? weights.safeCapturePriorityBonus : 0;
   // 明大子吃子優先（Req A/B）
   const revealedMajorCaptureAvailable = posRevealedMajorCaptureAvailable;
   const safeRevealedMajorCapture = !!move.captured && move.captured.revealed &&
     (publicType(move.captured) === 'rook' || publicType(move.captured) === 'cannon') &&
-    exchangeNet >= 0;
+    exchangeNet > 0 &&
+    !highRiskNeutralExchange;
   const safeRevealedRookCapture = safeRevealedMajorCapture && publicType(move.captured!) === 'rook';
   const revealedMajorCaptureScore = safeRevealedMajorCapture
     ? (safeRevealedRookCapture
@@ -1929,31 +1993,6 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
   // 暗兵卒開發延後（Req C）
   const pawnSoldierDelayedByMajorCapture = pawnSoldierDevelopment && revealedMajorCaptureAvailable;
   const pawnSoldierDelayPenalty = pawnSoldierDelayedByMajorCapture ? weights.pawnSoldierDelayWhenMajorCaptureAvailablePenalty : 0;
-
-  // 暗兵卒走入已翻兵卒攻擊（白送）—— 不限開局階段
-  const isUnrevealedPawnMove = isUnrevealedPawnSoldier(move.piece);
-  const pawnSoldierProtectedAfterAdvance = isUnrevealedPawnMove &&
-    isSquareProtectedBySide(nextBoard, state.turn, move.to);
-  const pawnSoldierWalksIntoRevealedPawnAttack = isUnrevealedPawnMove &&
-    captureGain === 0 &&
-    !blocksImmediateWin &&
-    isSquareAttackedByRevealedPawn(nextBoard, opponent(state.turn), move.to) &&
-    !pawnSoldierProtectedAfterAdvance;
-  const pawnSoldierSelfSacrifice =
-    pawnSoldierWalksIntoRevealedPawnAttack &&
-    !pawnSoldierProtectedAfterAdvance;
-  const pawnSoldierDevelopmentSuppressedByPawnAttack = pawnSoldierWalksIntoRevealedPawnAttack;
-  const pawnSoldierWalksIntoPawnAttackPenalty = pawnSoldierWalksIntoRevealedPawnAttack
-    ? Math.round(weights.pawnSoldierWalksIntoRevealedPawnAttackPenalty * (pawnSoldierProtectedAfterAdvance ? 0.5 : 1))
-    : 0;
-  const pawnSoldierDevelopmentSuppressedByPawnAttackPenalty = pawnSoldierDevelopmentSuppressedByPawnAttack
-    ? weights.pawnSoldierDevelopmentSuppressedByPawnAttackPenalty
-    : 0;
-  // 暗大子回吃風險
-  const hiddenMajorRecaptureRisk = captureGain > 0 &&
-    !blocksImmediateWin &&
-    !effectiveCheck &&
-    hiddenMajorCanRecaptureAt(nextBoard, opponent(state.turn), move.to);
   const unsafeCaptureExchangeNet = captureGain -
     Math.round(defensiveTargetValue(move.piece, state.board, move.from, weights));
   const unsafeEndgameCapture = hiddenMajorRecaptureRisk &&
@@ -2271,7 +2310,7 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
   // 沒有實際斬獲的「光威脅」預設視為無成果強制步。
   const forcingMoveRealProgress = forcingMove && (
     blocksImmediateWin ||
-    (captureGain > 0 && exchangeNet >= 0) ||
+    (captureGain > 0 && exchangeNet > 0 && !highRiskNeutralExchange && !hiddenMoverLowValueCapture) ||
     (!unsafeMaterialCheck && checkingQuality !== 'none' && checkingQuality !== 'meaninglessCheck') ||
     resolvedHighValueThreat ||
     multiPurposeDefense ||
@@ -2315,7 +2354,7 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     captureGain -
     reply.possibleLoss +
     revealScore(move, weights) +
-    openingBonus +
+    finalOpeningBonus +
     positionScore(move) +
     threatBonus +
     escapeBonus +
@@ -2342,6 +2381,8 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     purposePenalty +
     checkPenalty +
     safeCapturePriorityBonus +
+    highRiskNeutralExchangePenalty +
+    hiddenMoverLowValueCapturePenalty +
     prematureHiddenMajorLowHiddenCapturePenalty +
     hiddenRevealMateDefensePenalty +
     speculativeAttackPenalty +
@@ -2391,7 +2432,7 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     immediateCapture: reply.immediateCapture,
     exchangeNet,
     captureGain,
-    openingBonus,
+    openingBonus: finalOpeningBonus,
     threatValue,
     escapeBonus,
     pressureBonus,
@@ -2431,6 +2472,12 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     edgeCannonPressureUnresolved,
     speculativeAttack,
     safeCapturePriority,
+    highRiskNeutralExchange,
+    highRiskNeutralExchangePenalty,
+    hiddenMoverExpectedValue,
+    hiddenMoverLowValueLoss,
+    hiddenMoverLowValueCapture,
+    hiddenMoverLowValueCapturePenalty,
     prematureHiddenMajorLowHiddenCapture,
     prematureHiddenMajorLowHiddenCapturePenalty,
     repetitiveCheck,
@@ -2476,8 +2523,11 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     deadMajorShouldCaptureNow,
     deadMajorHoldSuppressedBySafeCapture,
     pawnSoldierWalksIntoRevealedPawnAttack,
+    pawnSoldierSacrificeHasTacticalJustification,
     pawnSoldierSelfSacrifice,
     pawnSoldierProtectedAfterAdvance,
+    pawnSoldierWalksIntoPawnAttackPenalty,
+    pawnSoldierDevelopmentScore,
     pawnSoldierDevelopmentSuppressedByPawnAttack,
     repeatedCheckingCycle,
     repeatedCheckingCyclePenaltyScore,
@@ -2588,6 +2638,9 @@ function reasonFor(best: Move, evaluation: MoveEvaluation, avoidedOpponentWin: b
   if (evaluation.hangingMove) return '落點缺少保護，已扣分';
   if (evaluation.advisorRevealClogRisk && evaluation.advisorRevealClogPenalty < 0) return '暗士翻子易卡住將門，已扣分';
   if (evaluation.revealChoiceRisk) return '吃低價暗子後給對方選擇權，已降分';
+  if (evaluation.highRiskNeutralExchange) return '高風險等價交換：未取得淨收益';
+  if (evaluation.hiddenMoverLowValueCapture) return '高價暗子主動吃低價目標，交換期望不利';
+  if (evaluation.pawnSoldierSelfSacrifice) return '暗兵卒走入明兵卒攻擊範圍，交換必虧';
   if (evaluation.prematureHiddenMajorLowHiddenCapture) return '高價暗子主動吃低價暗子，已降分';
   if (best.captured && evaluation.exchangeNet < 0) return '交換可能虧損，已扣分';
   if (evaluation.capturedConnectedAdvisor) return '吃掉連環士';
@@ -2607,8 +2660,7 @@ function reasonFor(best: Move, evaluation: MoveEvaluation, avoidedOpponentWin: b
   if (evaluation.safeRevealedMajorCapture) return '安全吃明大子，優先執行';
   if (evaluation.deadMajorHoldSuppressedBySafeCapture) return '有安全吃明大子機會，不應保留死車威脅';
   if (evaluation.pawnSoldierDelayedByMajorCapture) return '有明大子可吃，延後開發暗兵卒';
-  if (evaluation.pawnSoldierWalksIntoRevealedPawnAttack) return '暗兵卒走入已翻兵卒攻擊，已降分';
-  if (evaluation.pawnSoldierSelfSacrifice) return '暗兵卒白送，開發延後';
+  if (evaluation.pawnSoldierWalksIntoRevealedPawnAttack) return '暗兵卒走入明兵卒攻擊範圍，交換必虧';
   if (evaluation.firstMovePawnOpening) return '第一手穩健翹邊兵';
   if (evaluation.pawnSoldierDevelopment) return '開局優先開發暗兵卒';
   if (evaluation.revealTacticalSuppressed && !evaluation.effectiveCheck && !evaluation.releasedHorseFromPressure && !evaluation.releasedElephantFromPressure && !evaluation.preventsPawnLineLock) return '暗子翻開效果未知，未按確定將軍加分';
@@ -2815,6 +2867,12 @@ export function recommendMove(
     edgeCannonPressureUnresolved: evaluation.edgeCannonPressureUnresolved,
     speculativeAttack: evaluation.speculativeAttack,
     safeCapturePriority: evaluation.safeCapturePriority,
+    highRiskNeutralExchange: evaluation.highRiskNeutralExchange,
+    highRiskNeutralExchangePenalty: evaluation.highRiskNeutralExchangePenalty,
+    hiddenMoverExpectedValue: evaluation.hiddenMoverExpectedValue,
+    hiddenMoverLowValueLoss: evaluation.hiddenMoverLowValueLoss,
+    hiddenMoverLowValueCapture: evaluation.hiddenMoverLowValueCapture,
+    hiddenMoverLowValueCapturePenalty: evaluation.hiddenMoverLowValueCapturePenalty,
     prematureHiddenMajorLowHiddenCapture: evaluation.prematureHiddenMajorLowHiddenCapture,
     prematureHiddenMajorLowHiddenCapturePenalty: evaluation.prematureHiddenMajorLowHiddenCapturePenalty,
     repetitiveCheck: evaluation.repetitiveCheck,
@@ -2860,8 +2918,11 @@ export function recommendMove(
     deadMajorShouldCaptureNow: evaluation.deadMajorShouldCaptureNow,
     deadMajorHoldSuppressedBySafeCapture: evaluation.deadMajorHoldSuppressedBySafeCapture,
     pawnSoldierWalksIntoRevealedPawnAttack: evaluation.pawnSoldierWalksIntoRevealedPawnAttack,
+    pawnSoldierSacrificeHasTacticalJustification: evaluation.pawnSoldierSacrificeHasTacticalJustification,
     pawnSoldierSelfSacrifice: evaluation.pawnSoldierSelfSacrifice,
     pawnSoldierProtectedAfterAdvance: evaluation.pawnSoldierProtectedAfterAdvance,
+    pawnSoldierWalksIntoPawnAttackPenalty: evaluation.pawnSoldierWalksIntoPawnAttackPenalty,
+    pawnSoldierDevelopmentScore: evaluation.pawnSoldierDevelopmentScore,
     pawnSoldierDevelopmentSuppressedByPawnAttack: evaluation.pawnSoldierDevelopmentSuppressedByPawnAttack,
     repeatedCheckingCycle: evaluation.repeatedCheckingCycle,
     repeatedPositionRisk: evaluation.repeatedPositionRisk,

@@ -77,6 +77,10 @@ export type AiWeights = {
   hiddenHorseValueTwoRevealed: number;
   edgeCannonPressureHiddenPressureCap: number;
   safeCapturePriorityBonus: number;
+  highRiskExchangeThreshold: number;
+  highRiskNeutralExchangePenalty: number;
+  hiddenMoverLowValueThreshold: number;
+  hiddenMoverLowValueCapturePenalty: number;
   speculativeHiddenAttackPenalty: number;
   repetitiveCheckPenalty: number;
   majorActivationBonus: number;
@@ -251,6 +255,10 @@ export const defaultAiWeights: AiWeights = {
   hiddenHorseValueTwoRevealed: 170,
   edgeCannonPressureHiddenPressureCap: 8,
   safeCapturePriorityBonus: 35,
+  highRiskExchangeThreshold: 500,
+  highRiskNeutralExchangePenalty: -120,
+  hiddenMoverLowValueThreshold: 60,
+  hiddenMoverLowValueCapturePenalty: -100,
   speculativeHiddenAttackPenalty: -15,
   repetitiveCheckPenalty: -45,
   majorActivationBonus: 45,
@@ -285,7 +293,7 @@ export const defaultAiWeights: AiWeights = {
   safeRevealedRookCaptureBonus: 120,
   safeRevealedMajorCaptureBonus: 0,
   pawnSoldierDelayWhenMajorCaptureAvailablePenalty: -80,
-  pawnSoldierWalksIntoRevealedPawnAttackPenalty: -120,
+  pawnSoldierWalksIntoRevealedPawnAttackPenalty: -240,
   pawnSoldierDevelopmentSuppressedByPawnAttackPenalty: -80,
   repeatedCheckingCyclePenalty: -300,
   repeatedPositionPenalty: -250,

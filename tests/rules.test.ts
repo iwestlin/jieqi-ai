@@ -2953,7 +2953,10 @@ test('暗兵卒有保護則不扣分 pawnSoldierProtectedAfterAdvance', () => {
   assertOk(advanceTrace);
   assertEqual(advanceTrace.pawnSoldierDevelopment, true);
   assertEqual(advanceTrace.pawnSoldierProtectedAfterAdvance, true);
-  assertEqual(advanceTrace.pawnSoldierWalksIntoRevealedPawnAttack, false);
+  assertEqual(advanceTrace.pawnSoldierWalksIntoRevealedPawnAttack, true);
+  assertEqual(advanceTrace.pawnSoldierSelfSacrifice, true);
+  assertEqual(advanceTrace.pawnSoldierWalksIntoPawnAttackPenalty, defaultAiWeights.pawnSoldierWalksIntoRevealedPawnAttackPenalty);
+  assertEqual(advanceTrace.pawnSoldierDevelopmentScore, 0);
 });
 
 test('formatAiDebugReport: includes pawnSoldierWalksIntoRevealedPawnAttack trace fields in output', () => {
@@ -2967,8 +2970,11 @@ test('formatAiDebugReport: includes pawnSoldierWalksIntoRevealedPawnAttack trace
   const rec = recommendMove(state);
   const text = formatAiDebugReport({ modeName: 'test', state, recommendation: rec });
   assertOk(text.includes('pawnSoldierWalksIntoRevealedPawnAttack'));
+  assertOk(text.includes('pawnSoldierSacrificeHasTacticalJustification'));
   assertOk(text.includes('pawnSoldierSelfSacrifice'));
   assertOk(text.includes('pawnSoldierProtectedAfterAdvance'));
+  assertOk(text.includes('pawnSoldierWalksIntoPawnAttackPenalty'));
+  assertOk(text.includes('pawnSoldierDevelopmentScore'));
   assertOk(text.includes('pawnSoldierDevelopmentSuppressedByPawnAttack'));
 });
 
@@ -3479,18 +3485,18 @@ test('pawn sacrifice A1: unrevealed pawn walking into revealed pawn attack is pe
   assertOk(foundUnrevealedPawn);
 });
 
-test('pawn sacrifice A2: pawnSoldierWalksIntoRevealedPawnAttack trace is false when protected', () => {
-  // An unrevealed pawn that IS protected should not be flagged as self-sacrifice
+test('pawn sacrifice A2: protected pawn walk into revealed pawn attack is still flagged', () => {
+  // Protection only affects later recapture, not the first-layer pawn-soldier loss.
   const state = newGame();
   const moves = getAllLegalMoves(state.board, 'red');
   const result = recommendMove(state, moves);
   assertOk(result.traces !== undefined);
-  // For any move flagged as pawnSoldierWalksIntoRevealedPawnAttack,
-  // pawnSoldierProtectedAfterAdvance must be false (the flag only fires when unprotected)
   const flagged = result.traces!.filter(t => t.pawnSoldierWalksIntoRevealedPawnAttack);
   for (const t of flagged) {
-    // If walking into pawn attack, it must not be protected
-    assertOk(!t.pawnSoldierProtectedAfterAdvance);
+    assertEqual(t.pawnSoldierSelfSacrifice, !t.pawnSoldierSacrificeHasTacticalJustification);
+    if (t.pawnSoldierSelfSacrifice) {
+      assertEqual(t.pawnSoldierWalksIntoPawnAttackPenalty, defaultAiWeights.pawnSoldierWalksIntoRevealedPawnAttackPenalty);
+    }
   }
 });
 
@@ -3583,13 +3589,13 @@ test('pawn sacrifice A2: pawnSoldierSelfSacrifice implies pawnSoldierWalksIntoRe
   }
 });
 
-test('pawn sacrifice A3: protected unrevealed pawn does not get self-sacrifice flag', () => {
+test('pawn sacrifice A3: protection does not cancel pawn-soldier self-sacrifice flag', () => {
   const state = newGame();
   const result = recommendMove(state);
   assertOk(result.traces !== undefined);
   for (const t of result.traces!) {
-    if (t.pawnSoldierProtectedAfterAdvance) {
-      assertOk(!t.pawnSoldierSelfSacrifice);
+    if (t.pawnSoldierProtectedAfterAdvance && t.pawnSoldierWalksIntoRevealedPawnAttack) {
+      assertEqual(t.pawnSoldierSelfSacrifice, !t.pawnSoldierSacrificeHasTacticalJustification);
     }
   }
 });

@@ -2,6 +2,14 @@
 
 ## Completed This Round
 
+- Fixed unsafe exchange and pawn-soldier sacrifice scoring.
+- High-risk equal exchanges with hidden-major recapture risk are no longer marked safe or productive.
+- Safe capture priority now requires real positive exchange value.
+- Revealed major captures now require positive exchange value before receiving safe-major priority.
+- Hidden movers now compare expected hidden value against capture gain, so high-value hidden movers no longer get safe-capture credit for eating low-value targets.
+- Hidden pawn-soldiers walking into revealed pawn attack now lose opening/development bonuses and receive the full sacrifice penalty even if protected.
+- Added trace/debug report fields for high-risk neutral exchange, hidden-mover low-value capture, and pawn-soldier self-sacrifice.
+- Added regression tests for unsafe neutral exchange, hidden pawn-soldier sacrifice, hidden rook eating revealed pawn, and genuinely safe net-positive exchange.
 - Fixed the `targetValue()` hidden-capture leak from commit `e9dae70`.
 - Hidden captured pieces now use expected value before any piece-specific target valuation.
 - Hidden rook/cannon/horse appearances no longer count as definite `directMajorCapture` forcing targets.
@@ -15,7 +23,7 @@
 
 ## Suggested Next Tasks
 
-1. Add regression tests for specific unsafe capture-check examples from real games.
+1. Add real-game regression positions for unsafe capture-checks and high-risk equal exchanges.
 2. Add a small UI/debug label that distinguishes Fair AI text from Oracle/Debug text more clearly.
 3. Expand mate-threat detection only after profiling performance on mobile.
 4. Later: Belief State / remaining-pool probability model.

@@ -66,6 +66,13 @@ function stateWithHiddenTarget(hiddenOriginal: PieceType): { state: GameState; m
   return { state: { board, turn: 'red', history: [], status: 'playing' }, move };
 }
 
+function singleTrace(state: GameState, move: Move) {
+  const result = recommendMove(state, [move]);
+  assertOk(result.traces);
+  assertOk(result.traces[0]);
+  return result.traces[0];
+}
+
 test('capturing hidden advisor and hidden horse uses the same expected material value', () => {
   const advisorCase = stateWithHiddenTarget('advisor');
   const horseCase = stateWithHiddenTarget('horse');
@@ -108,4 +115,82 @@ test('hidden rook appearance is not a definite direct major capture', () => {
   );
   assertEqual(trace.forcingMove, false);
   assertEqual(trace.forcingTargetKind, null);
+});
+
+test('high-risk neutral exchange is not safe or productive', () => {
+  const board = baseBoard();
+  board[5][0] = null;
+  board[5][4] = null;
+  place(board, 4, 4, piece('red', 'pawn', 'pawn', true));
+  place(board, 5, 0, piece('red', 'cannon', 'cannon', true));
+  place(board, 5, 1, piece('red', 'pawn', 'pawn', true));
+  place(board, 5, 2, piece('black', 'cannon', 'cannon', true));
+  place(board, 5, 8, piece('black', 'rook', 'rook', false));
+
+  const state: GameState = { board, turn: 'red', history: [], status: 'playing' };
+  const move = findMove(board, 'red', [5, 0], [5, 2]);
+  const trace = singleTrace(state, move);
+
+  assertEqual(trace.captureGain, defaultAiWeights.targetCannonValue);
+  assertEqual(trace.exchangeNet, 0);
+  assertEqual(trace.hiddenMajorRecaptureRisk, true);
+  assertEqual(trace.highRiskNeutralExchange, true);
+  assertEqual(trace.highRiskNeutralExchangePenalty, defaultAiWeights.highRiskNeutralExchangePenalty);
+  assertEqual(trace.safeCapturePriority, false);
+  assertEqual(trace.safeRevealedMajorCapture, false);
+  assertOk(trace.forcingMoveQuality !== 'productive');
+});
+
+test('protected hidden pawn-soldier still cannot walk into revealed pawn attack', () => {
+  const board = emptyBoard();
+  place(board, 9, 4, piece('red', 'king'));
+  place(board, 0, 4, piece('black', 'king'));
+  place(board, 5, 4, piece('red', 'pawn', 'pawn', true));
+  place(board, 3, 5, piece('black', 'pawn', 'pawn', false));
+  place(board, 5, 5, piece('red', 'pawn', 'pawn', true));
+  place(board, 4, 0, piece('black', 'rook', 'rook', true));
+
+  const state: GameState = { board, turn: 'black', history: [], status: 'playing' };
+  const move = findMove(board, 'black', [3, 5], [4, 5]);
+  const trace = singleTrace(state, move);
+
+  assertEqual(trace.pawnSoldierWalksIntoRevealedPawnAttack, true);
+  assertEqual(trace.pawnSoldierProtectedAfterAdvance, true);
+  assertEqual(trace.pawnSoldierSacrificeHasTacticalJustification, false);
+  assertEqual(trace.pawnSoldierSelfSacrifice, true);
+  assertEqual(trace.pawnSoldierDevelopmentScore, 0);
+  assertEqual(trace.openingBonus, 0);
+  assertEqual(trace.pawnSoldierWalksIntoPawnAttackPenalty, defaultAiWeights.pawnSoldierWalksIntoRevealedPawnAttackPenalty);
+});
+
+test('hidden rook eating a revealed pawn is treated as low-value hidden mover capture', () => {
+  const board = baseBoard();
+  board[5][0] = piece('red', 'rook', 'rook', false);
+  place(board, 5, 1, piece('black', 'pawn', 'pawn', true));
+
+  const state: GameState = { board, turn: 'red', history: [], status: 'playing' };
+  const move = findMove(board, 'red', [5, 0], [5, 1]);
+  const trace = singleTrace(state, move);
+
+  assertEqual(trace.hiddenMoverExpectedValue, defaultAiWeights.hiddenExpectedValue + defaultAiWeights.hiddenRookCannonActivityBonus);
+  assertEqual(trace.captureGain, defaultAiWeights.crossedPawnTargetValue);
+  assertEqual(trace.hiddenMoverLowValueLoss, 100);
+  assertEqual(trace.hiddenMoverLowValueCapture, true);
+  assertEqual(trace.hiddenMoverLowValueCapturePenalty, defaultAiWeights.hiddenMoverLowValueCapturePenalty);
+  assertEqual(trace.safeCapturePriority, false);
+});
+
+test('net-positive revealed major capture is still safe', () => {
+  const board = baseBoard();
+  place(board, 5, 1, piece('black', 'cannon', 'cannon', true));
+
+  const state: GameState = { board, turn: 'red', history: [], status: 'playing' };
+  const move = findMove(board, 'red', [5, 0], [5, 1]);
+  const trace = singleTrace(state, move);
+
+  assertOk(trace.exchangeNet > 0);
+  assertEqual(trace.highRiskNeutralExchange, false);
+  assertEqual(trace.hiddenMoverLowValueCapture, false);
+  assertEqual(trace.safeCapturePriority, true);
+  assertEqual(trace.safeRevealedMajorCapture, true);
 });
