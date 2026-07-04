@@ -2,6 +2,35 @@
 
 ## Latest Completed Work
 
+- Added a strict Move Priority Gate to Fair AI move selection.
+- Candidate moves are now assigned a priority tier before final selection:
+  - Tier 0: direct win / blocking immediate win.
+  - Tier 1: safety gate and resolving high-value threats.
+  - Tier 2: safe material captures only.
+  - Tier 3: productive forcing moves.
+  - Tier 4: structure, opening, endgame, and development plans.
+  - Tier 5: low-priority, unsafe, aimless, or repetitive moves.
+- `recommendMove` now filters to the best available tier before sorting within that tier, so lower-tier structure plans cannot beat urgent safety or safe material moves just by raw score.
+- Safe material capture tiering now requires positive exchange value, `hasClearGain`, `safeCapturePriority`, and no unsafe exchange flags.
+- Added material capture ranking for Tier 2 sorting:
+  - `rook`
+  - `cannonHorse`
+  - `highMinor`
+  - `lowMinor`
+  - `none`
+- Added priority trace/debug fields:
+  - `priorityTier`
+  - `priorityTierLabel`
+  - `prioritySubRank`
+  - `filteredByHigherPriorityTier`
+  - `bestAvailablePriorityTier`
+  - `materialCaptureRank`
+- Repetitive / cycle forcing moves are downgraded into low-priority handling unless they have a higher tactical exception.
+- Added regression coverage for:
+  - unsafe exchanges not entering the safe material tier
+  - safe captures filtering out lower-tier structure moves
+  - material capture rank output
+  - priority gate fields in debug reports
 - Split edge-rook pawn-line guard evaluation by board side.
 - 1/9-file revealed edge rooks now keep their threat side (`left` / `right`), so only the same-side hidden horse can receive pawn-line guard credit.
 - 3/7-file pawn-line rook threats are now detected only when an enemy revealed rook legally attacks an unrevealed pawn on that exact pawn-line column.
@@ -75,6 +104,9 @@
 ## Files Changed
 
 - `src/ai/simpleAi.ts`
+  - Added strict Move Priority Gate tiering and tier-aware final move selection.
+  - Added material capture ranking for safe material sorting.
+  - Separates unsafe material-capture checks from non-capture forcing moves so useful non-capture forcing moves are not wrongly downgraded.
   - Rejects high-risk neutral exchanges from safe/forcing productive buckets.
   - Penalizes hidden movers that proactively eat low-value targets below their expected hidden value.
   - Treats hidden pawn-soldier movement into revealed pawn attack as a full sacrifice even when protected.
@@ -88,8 +120,10 @@
   - Raised hidden pawn-soldier revealed-pawn attack penalty to full sacrifice level.
   - Keeps minimal weights for hidden expected value and tactical scoring.
 - `src/ai/aiTrace.ts`
+  - Added priority tier, priority filtering, and material capture rank trace fields.
   - Added trace fields for unsafe exchanges, hidden-mover low-value capture, pawn-soldier sacrifice, unsafe material checks, and mate-threat creation.
 - `src/ai/aiDebugReport.ts`
+  - Prints priority tier, priority filtering, and material capture rank fields.
   - Fair report notation no longer reveals hidden capture realType.
   - Prints the new trace fields.
 - `src/ai/aiPanelRecommendations.ts`
@@ -102,13 +136,13 @@
   - Updated pawn-soldier sacrifice expectations so protection no longer cancels first-layer sacrifice.
   - Keeps the edge-rook pressure regression allowing real pawn-line horse guard over ordinary pawn development.
 - `tests/fair_hidden_values.test.ts`
-  - Verifies hidden advisor/horse expected capture value, hidden advisor connected-advisor exclusion, hidden rook non-major forcing behavior, unsafe neutral exchanges, hidden pawn-soldier sacrifices, hidden rook low-value capture, and safe net-positive exchanges.
+  - Verifies hidden advisor/horse expected capture value, hidden advisor connected-advisor exclusion, hidden rook non-major forcing behavior, unsafe neutral exchanges, hidden pawn-soldier sacrifices, hidden rook low-value capture, safe net-positive exchanges, side-specific rook pressure, unsafe revealed-major captures, and priority gate behavior.
 - `package.json`
   - Runs the new hidden-value regression test after the existing rules test.
 
 ## Verification
 
-- `npm test`: passed after unsafe exchange and pawn-soldier sacrifice regression updates.
+- `npm test`: passed after priority gate regression updates.
 - `npx tsc --noEmit`: passed.
 - `npm run build`: passed.
 

@@ -2,6 +2,17 @@
 
 ## Completed This Round
 
+- Added strict Move Priority Gate for Fair AI recommendation selection.
+- Added priority tiers:
+  - Tier 0 direct win / block immediate win.
+  - Tier 1 safety gate / high-value threat defense.
+  - Tier 2 safe material capture.
+  - Tier 3 productive forcing move.
+  - Tier 4 structure / opening / endgame plan.
+  - Tier 5 low-priority, unsafe, aimless, or repetitive move.
+- Final move choice now filters by the best available tier before comparing detailed scores.
+- Added material capture rank for safe material ordering: rook, cannon/horse, high minor, low minor, none.
+- Added priority gate trace/debug fields and regression tests.
 - Split edge-rook pawn-line guard logic by left/right side.
 - Separated 1/9-file edge rook pressure from direct 3/7-file pawn-line rook attacks.
 - Added trace/debug output for edge rook threat side, threatened pawn-line column, same-side horse guard, and direct pawn-line rook threat.
@@ -32,11 +43,12 @@
 
 ## Suggested Next Tasks
 
-1. Add real-game regression positions for unsafe capture-checks and high-risk equal exchanges.
-2. Add a small UI/debug label that distinguishes Fair AI text from Oracle/Debug text more clearly.
-3. Expand mate-threat detection only after profiling performance on mobile.
-4. Later: Belief State / remaining-pool probability model.
-5. Later: Threat Map MVP.
+1. Add real-game regression positions for strict priority tier edge cases.
+2. Add real-game regression positions for unsafe capture-checks and high-risk equal exchanges.
+3. Add a small UI/debug label that distinguishes Fair AI text from Oracle/Debug text more clearly.
+4. Expand mate-threat detection only after profiling performance on mobile.
+5. Later: Belief State / remaining-pool probability model.
+6. Later: Threat Map MVP.
 
 ## Do Not Do Unless Explicitly Requested
 

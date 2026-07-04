@@ -8,6 +8,8 @@ import type { AiLearningPatternId } from './learningPatterns';
 import type { AiMoveTrace, AiRecommendation } from './aiTrace';
 
 type BoardSide = 'left' | 'right';
+type MovePriorityTier = 0 | 1 | 2 | 3 | 4 | 5;
+type MaterialCaptureRank = 'rook' | 'cannonHorse' | 'highMinor' | 'lowMinor' | 'none';
 
 const openingPawnStarts = createInitialBoard().flatMap((row, rowIndex) =>
   row.flatMap((piece, colIndex) =>
@@ -206,6 +208,12 @@ type MoveEvaluation = {
   unsafeMaterialCheckPenalty: number;
   createsMateThreat: boolean;
   createsMateThreatScore: number;
+  priorityTier: MovePriorityTier;
+  priorityTierLabel: string;
+  prioritySubRank: string;
+  filteredByHigherPriorityTier: boolean;
+  bestAvailablePriorityTier: MovePriorityTier;
+  materialCaptureRank: MaterialCaptureRank;
 };
 
 type AiThreatInfo = {
@@ -221,6 +229,222 @@ type LooseHiddenPieceReport = {
   loosePositions: Position[];
   protectedUnderAttackPositions: Position[];
 };
+
+function priorityTierLabel(tier: MovePriorityTier): string {
+  switch (tier) {
+    case 0: return 'Tier 0: 直接勝利/阻止一步殺';
+    case 1: return 'Tier 1: 安全門/解重大威脅';
+    case 2: return 'Tier 2: 安全淨賺吃子';
+    case 3: return 'Tier 3: 有成果強制步';
+    case 4: return 'Tier 4: 結構/開局/計畫';
+    case 5: return 'Tier 5: 低優先或風險手';
+  }
+}
+
+function materialRankValue(rank: MaterialCaptureRank): number {
+  switch (rank) {
+    case 'rook': return 0;
+    case 'cannonHorse': return 1;
+    case 'highMinor': return 2;
+    case 'lowMinor': return 3;
+    case 'none': return 4;
+  }
+}
+
+function tierFiveSubRankValue(subRank: string): number {
+  switch (subRank) {
+    case 'fallback': return 0;
+    case 'aimless': return 1;
+    case 'unsafe': return 2;
+    case 'cycleOrRepetition': return 3;
+    default: return 4;
+  }
+}
+
+function materialCaptureRankFor(move: Move, evaluation: Pick<MoveEvaluation, 'captureGain'>, weights: AiWeights): MaterialCaptureRank {
+  if (!move.captured || evaluation.captureGain <= 0) return 'none';
+  const capturedType = publicType(move.captured);
+  if (capturedType === 'rook') return 'rook';
+  if (capturedType === 'cannon' || capturedType === 'horse') return 'cannonHorse';
+  if (
+    capturedType === 'advisor' ||
+    capturedType === 'elephant' ||
+    evaluation.captureGain >= weights.crossedPawnTargetValue
+  ) {
+    return 'highMinor';
+  }
+  return 'lowMinor';
+}
+
+function determineMovePriorityTier(
+  move: Move,
+  evaluation: Pick<
+    MoveEvaluation,
+    | 'blocksImmediateWin'
+    | 'resolvedHighValueThreat'
+    | 'minimumLossDefense'
+    | 'partialDefense'
+    | 'rescuesHighValuePiece'
+    | 'rescuesSecondaryPiece'
+    | 'blocksHorseFork'
+    | 'captureGain'
+    | 'exchangeNet'
+    | 'hasClearGain'
+    | 'safeCapturePriority'
+    | 'unsafeHiddenRecaptureExchange'
+    | 'highRiskNeutralExchange'
+    | 'hiddenMoverLowValueCapture'
+    | 'prematureHiddenMajorLowHiddenCapture'
+    | 'unsafeMaterialCheck'
+    | 'pawnSoldierSelfSacrifice'
+    | 'forcingMove'
+    | 'forcingMoveQuality'
+    | 'checkingQuality'
+    | 'structureScore'
+    | 'openingBonus'
+    | 'majorActivation'
+    | 'pawnSoldierDevelopmentScore'
+    | 'endgamePlanScore'
+    | 'horsePawnLineGuard'
+    | 'sameSideEdgeRookHorseGuard'
+    | 'directPawnLineRookThreat'
+    | 'avoidAimlessMove'
+    | 'meaningless'
+    | 'repetitiveCheck'
+    | 'repetitiveForcingMove'
+    | 'forcingCycle'
+    | 'mutualChaseLoop'
+    | 'repeatedCheckingCycle'
+  >,
+  weights: AiWeights
+): { priorityTier: MovePriorityTier; prioritySubRank: string; materialCaptureRank: MaterialCaptureRank } {
+  const materialCaptureRank = materialCaptureRankFor(move, evaluation, weights);
+  const unsafeMaterialCapture =
+    evaluation.captureGain > 0 && (
+    evaluation.exchangeNet <= 0 ||
+    evaluation.unsafeHiddenRecaptureExchange ||
+    evaluation.highRiskNeutralExchange ||
+    evaluation.hiddenMoverLowValueCapture ||
+    evaluation.prematureHiddenMajorLowHiddenCapture
+    );
+  const unsafeMove =
+    unsafeMaterialCapture ||
+    evaluation.unsafeMaterialCheck ||
+    evaluation.pawnSoldierSelfSacrifice ||
+    evaluation.repetitiveCheck;
+
+  if (evaluation.blocksImmediateWin) {
+    return { priorityTier: 0, prioritySubRank: 'blocksImmediateWin', materialCaptureRank };
+  }
+
+  if (
+    evaluation.resolvedHighValueThreat ||
+    evaluation.rescuesHighValuePiece ||
+    evaluation.rescuesSecondaryPiece ||
+    evaluation.blocksHorseFork ||
+    evaluation.minimumLossDefense ||
+    evaluation.partialDefense
+  ) {
+    const subRank = evaluation.resolvedHighValueThreat ? 'resolvedHighValueThreat'
+      : evaluation.rescuesHighValuePiece ? 'rescuesHighValuePiece'
+      : evaluation.rescuesSecondaryPiece ? 'rescuesSecondaryPiece'
+      : evaluation.blocksHorseFork ? 'blocksHorseFork'
+      : evaluation.minimumLossDefense ? 'minimumLossDefense'
+      : 'partialDefense';
+    return { priorityTier: 1, prioritySubRank: subRank, materialCaptureRank };
+  }
+
+  const safeMaterialCapture =
+    evaluation.captureGain > 0 &&
+    evaluation.exchangeNet > 0 &&
+    evaluation.hasClearGain &&
+    evaluation.safeCapturePriority &&
+    !unsafeMove;
+  if (safeMaterialCapture) {
+    return { priorityTier: 2, prioritySubRank: materialCaptureRank, materialCaptureRank };
+  }
+
+  if (
+    evaluation.forcingMove &&
+    evaluation.forcingMoveQuality === 'productive' &&
+    evaluation.checkingQuality !== 'meaninglessCheck' &&
+    !unsafeMove
+  ) {
+    return { priorityTier: 3, prioritySubRank: evaluation.checkingQuality, materialCaptureRank };
+  }
+
+  const hasPlan =
+    evaluation.structureScore > 0 ||
+    evaluation.openingBonus > 0 ||
+    evaluation.majorActivation ||
+    evaluation.pawnSoldierDevelopmentScore > 0 ||
+    evaluation.endgamePlanScore > 0 ||
+    evaluation.horsePawnLineGuard ||
+    evaluation.sameSideEdgeRookHorseGuard ||
+    evaluation.directPawnLineRookThreat;
+  if (hasPlan && !evaluation.pawnSoldierSelfSacrifice && !evaluation.repetitiveCheck) {
+    return { priorityTier: 4, prioritySubRank: 'structureOpeningPlan', materialCaptureRank };
+  }
+
+  return {
+    priorityTier: 5,
+    prioritySubRank: evaluation.avoidAimlessMove || evaluation.meaningless ? 'aimless'
+      : evaluation.repetitiveCheck || evaluation.repetitiveForcingMove || evaluation.forcingCycle || evaluation.mutualChaseLoop || evaluation.repeatedCheckingCycle ? 'cycleOrRepetition'
+      : unsafeMove ? 'unsafe'
+      : 'fallback',
+    materialCaptureRank,
+  };
+}
+
+function compareWithinSameTier(
+  a: { move: Move; evaluation: MoveEvaluation },
+  b: { move: Move; evaluation: MoveEvaluation }
+): number {
+  const tier = a.evaluation.priorityTier;
+  if (tier !== b.evaluation.priorityTier) return a.evaluation.priorityTier - b.evaluation.priorityTier;
+
+  if (tier === 1) {
+    const lossAfter = a.evaluation.threatLossAfter - b.evaluation.threatLossAfter;
+    if (lossAfter !== 0) return lossAfter;
+    const reduced = b.evaluation.threatLossReduced - a.evaluation.threatLossReduced;
+    if (reduced !== 0) return reduced;
+  }
+
+  if (tier === 2) {
+    const rank = materialRankValue(a.evaluation.materialCaptureRank) - materialRankValue(b.evaluation.materialCaptureRank);
+    if (rank !== 0) return rank;
+    const exchange = b.evaluation.exchangeNet - a.evaluation.exchangeNet;
+    if (exchange !== 0) return exchange;
+    const capture = b.evaluation.captureGain - a.evaluation.captureGain;
+    if (capture !== 0) return capture;
+  }
+
+  if (tier === 3) {
+    const progress = b.evaluation.forcingMoveProgress - a.evaluation.forcingMoveProgress;
+    if (progress !== 0) return progress;
+  }
+
+  if (tier === 5) {
+    const subRank = tierFiveSubRankValue(a.evaluation.prioritySubRank) - tierFiveSubRankValue(b.evaluation.prioritySubRank);
+    if (subRank !== 0) return subRank;
+  }
+
+  return b.evaluation.score - a.evaluation.score;
+}
+
+function applyPriorityGate(evaluations: { move: Move; evaluation: MoveEvaluation }[]): { move: Move; evaluation: MoveEvaluation } {
+  const bestAvailablePriorityTier = Math.min(
+    ...evaluations.map(candidate => candidate.evaluation.priorityTier)
+  ) as MovePriorityTier;
+
+  for (const candidate of evaluations) {
+    candidate.evaluation.bestAvailablePriorityTier = bestAvailablePriorityTier;
+    candidate.evaluation.filteredByHigherPriorityTier =
+      candidate.evaluation.priorityTier > bestAvailablePriorityTier;
+  }
+
+  return [...evaluations].sort(compareWithinSameTier)[0];
+}
 
 type PawnSoldierFollowUp = {
   pawnSoldierFollowUpHorse: boolean;
@@ -2551,6 +2775,44 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     palaceThreatMap.palaceThreatMapScore -
     Math.round(reply.maxReplyGain * weights.maxReplyGainPenaltyRatio);
 
+  const priority = determineMovePriorityTier(move, {
+    blocksImmediateWin,
+    resolvedHighValueThreat,
+    minimumLossDefense,
+    partialDefense,
+    rescuesHighValuePiece,
+    rescuesSecondaryPiece,
+    blocksHorseFork,
+    captureGain,
+    exchangeNet,
+    hasClearGain,
+    safeCapturePriority,
+    unsafeHiddenRecaptureExchange,
+    highRiskNeutralExchange,
+    hiddenMoverLowValueCapture,
+    prematureHiddenMajorLowHiddenCapture,
+    unsafeMaterialCheck,
+    pawnSoldierSelfSacrifice,
+    forcingMove,
+    forcingMoveQuality,
+    checkingQuality,
+    structureScore: finalStructureScore,
+    openingBonus: finalOpeningBonus,
+    majorActivation,
+    pawnSoldierDevelopmentScore,
+    endgamePlanScore: endgamePlan.endgamePlanScore,
+    horsePawnLineGuard: structure.horsePawnLineGuard,
+    sameSideEdgeRookHorseGuard: structure.sameSideEdgeRookHorseGuard,
+    directPawnLineRookThreat: structure.directPawnLineRookThreat,
+    avoidAimlessMove: endgamePlan.avoidAimlessMove,
+    meaningless,
+    repetitiveCheck,
+    repetitiveForcingMove,
+    forcingCycle,
+    mutualChaseLoop,
+    repeatedCheckingCycle,
+  }, weights);
+
   return {
     score,
     risk: reply.risk,
@@ -2739,6 +3001,12 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     unsafeMaterialCheckPenalty,
     createsMateThreat,
     createsMateThreatScore,
+    priorityTier: priority.priorityTier,
+    priorityTierLabel: priorityTierLabel(priority.priorityTier),
+    prioritySubRank: priority.prioritySubRank,
+    filteredByHigherPriorityTier: false,
+    bestAvailablePriorityTier: priority.priorityTier,
+    materialCaptureRank: priority.materialCaptureRank,
   };
 }
 
@@ -2887,11 +3155,11 @@ export function recommendMove(
   for (const move of scoringMoves.slice(1)) {
     const evaluation = evaluateMove(state, move, currentlyAllowsOpponentWin && !allowsOpponentWin(state, move), weights, posRevealedMajorCaptureAvailable, preHighValueThreats);
     evaluations.push({ move, evaluation });
-    if (evaluation.score > bestEvaluation.score) {
-      best = move;
-      bestEvaluation = evaluation;
-    }
   }
+
+  const priorityBest = applyPriorityGate(evaluations);
+  best = priorityBest.move;
+  bestEvaluation = priorityBest.evaluation;
 
   // Need B: If best is fruitless repetitive checking but alternatives exist, override
   const suppressedRepetitiveMoves = new Set<Move>();
@@ -2970,6 +3238,10 @@ export function recommendMove(
       }
     }
   }
+
+  const gatedBest = applyPriorityGate(evaluations);
+  best = gatedBest.move;
+  bestEvaluation = gatedBest.evaluation;
 
   const traces: AiMoveTrace[] = evaluations.map(({ move, evaluation }) => ({
     move,
@@ -3143,6 +3415,12 @@ export function recommendMove(
     unsafeMaterialCheckPenalty: evaluation.unsafeMaterialCheckPenalty,
     createsMateThreat: evaluation.createsMateThreat,
     createsMateThreatScore: evaluation.createsMateThreatScore,
+    priorityTier: evaluation.priorityTier,
+    priorityTierLabel: evaluation.priorityTierLabel,
+    prioritySubRank: evaluation.prioritySubRank,
+    filteredByHigherPriorityTier: evaluation.filteredByHigherPriorityTier,
+    bestAvailablePriorityTier: evaluation.bestAvailablePriorityTier,
+    materialCaptureRank: evaluation.materialCaptureRank,
   }));
 
   return {

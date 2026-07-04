@@ -180,6 +180,12 @@ export type AiMoveTrace = {
   unsafeMaterialCheckPenalty?: number;
   createsMateThreat?: boolean;
   createsMateThreatScore?: number;
+  priorityTier?: number;
+  priorityTierLabel?: string;
+  prioritySubRank?: string;
+  filteredByHigherPriorityTier?: boolean;
+  bestAvailablePriorityTier?: number;
+  materialCaptureRank?: 'rook' | 'cannonHorse' | 'highMinor' | 'lowMinor' | 'none';
 };
 
 /**

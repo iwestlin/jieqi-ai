@@ -1,5 +1,6 @@
 import { recommendMove } from '../src/ai/simpleAi';
 import { defaultAiWeights } from '../src/ai/aiWeights';
+import { formatAiDebugReport } from '../src/ai/aiDebugReport';
 import { getAllLegalMoves } from '../src/game/checkRules';
 import type { Board, GameState, Move, Piece, PieceType, Side } from '../src/types/chess';
 
@@ -168,6 +169,8 @@ test('high-risk neutral exchange is not safe or productive', () => {
   assertEqual(trace.safeCapturePriority, false);
   assertEqual(trace.safeRevealedMajorCapture, false);
   assertOk(trace.forcingMoveQuality !== 'productive');
+  assertOk(trace.priorityTier !== 2);
+  assertEqual(trace.materialCaptureRank, 'cannonHorse');
 });
 
 test('protected hidden pawn-soldier still cannot walk into revealed pawn attack', () => {
@@ -225,6 +228,8 @@ test('net-positive revealed major capture is still safe', () => {
   assertEqual(trace.hasClearGain, true);
   assertEqual(trace.safeCapturePriority, true);
   assertEqual(trace.safeRevealedMajorCapture, true);
+  assertEqual(trace.priorityTier, 2);
+  assertEqual(trace.materialCaptureRank, 'cannonHorse');
 });
 
 test('left edge rook only gives same-side horse pawn-line guard bonus', () => {
@@ -237,6 +242,7 @@ test('left edge rook only gives same-side horse pawn-line guard bonus', () => {
   assertEqual(leftTrace.edgeRookThreatSide, 'left');
   assertEqual(leftTrace.sameSideEdgeRookHorseGuard, true);
   assertEqual(leftTrace.horsePawnLineGuard, true);
+  assertEqual(leftTrace.priorityTier, 4);
   assertEqual(rightTrace.edgeRookThreatSide, 'left');
   assertEqual(rightTrace.sameSideEdgeRookHorseGuard, false);
   assertEqual(rightTrace.horsePawnLineGuard, false);
@@ -323,6 +329,8 @@ test('revealed rook eating low-value elephant with hidden recapture is unsafe', 
   assertEqual(trace.hasClearGain, false);
   assertEqual(trace.safeRevealedMajorCapture, false);
   assertOk(trace.forcingMoveQuality !== 'productive');
+  assertOk(trace.priorityTier !== 2);
+  assertEqual(trace.filteredByHigherPriorityTier, false);
 });
 
 test('revealed rook eating revealed rook without hidden recapture remains safe', () => {
@@ -338,4 +346,49 @@ test('revealed rook eating revealed rook without hidden recapture remains safe',
   assertEqual(trace.safeCapturePriority, true);
   assertEqual(trace.hasClearGain, true);
   assertEqual(trace.safeRevealedMajorCapture, true);
+  assertOk(trace.priorityTier === 1 || trace.priorityTier === 2);
+  assertEqual(trace.materialCaptureRank, 'rook');
+});
+
+test('priority gate filters lower-tier structure when safe capture exists', () => {
+  const board = baseHorseGuardBoard();
+  place(board, 6, 0, piece('black', 'pawn', 'rook', true));
+  place(board, 5, 1, piece('black', 'cannon', 'cannon', true));
+  place(board, 5, 0, piece('red', 'rook', 'rook', true));
+
+  const state: GameState = { board, turn: 'red', history: [], status: 'playing' };
+  const safeCapture = findMove(board, 'red', [5, 0], [5, 1]);
+  const structureMove = findMove(board, 'red', [9, 1], [7, 2]);
+  const result = recommendMove(state, [structureMove, safeCapture]);
+  assertOk(result.move);
+  assertEqual(result.move.from.row, 5);
+  assertEqual(result.move.from.col, 0);
+  assertOk(result.traces);
+
+  const safeTrace = result.traces.find(t => t.move === safeCapture);
+  const structureTrace = result.traces.find(t => t.move === structureMove);
+  assertOk(safeTrace);
+  assertOk(structureTrace);
+  assertOk(safeTrace.priorityTier === 1 || safeTrace.priorityTier === 2);
+  assertEqual(safeTrace.bestAvailablePriorityTier, safeTrace.priorityTier);
+  assertEqual(safeTrace.filteredByHigherPriorityTier, false);
+  assertEqual(structureTrace.priorityTier, 4);
+  assertEqual(structureTrace.bestAvailablePriorityTier, safeTrace.priorityTier);
+  assertEqual(structureTrace.filteredByHigherPriorityTier, true);
+});
+
+test('debug report prints priority gate fields', () => {
+  const board = baseBoard();
+  place(board, 5, 1, piece('black', 'cannon', 'cannon', true));
+  const state: GameState = { board, turn: 'red', history: [], status: 'playing' };
+  const move = findMove(board, 'red', [5, 0], [5, 1]);
+  const recommendation = recommendMove(state, [move]);
+  const report = formatAiDebugReport({ modeName: 'test', state, recommendation });
+
+  assertOk(report.includes('priorityTier'));
+  assertOk(report.includes('priorityTierLabel'));
+  assertOk(report.includes('prioritySubRank'));
+  assertOk(report.includes('bestAvailablePriorityTier'));
+  assertOk(report.includes('filteredByHigherPriorityTier'));
+  assertOk(report.includes('materialCaptureRank'));
 });
