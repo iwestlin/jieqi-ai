@@ -81,6 +81,8 @@ export type AiWeights = {
   highRiskNeutralExchangePenalty: number;
   hiddenMoverLowValueThreshold: number;
   hiddenMoverLowValueCapturePenalty: number;
+  unsafeHiddenRecaptureLossThreshold: number;
+  unsafeHiddenRecaptureExchangePenalty: number;
   speculativeHiddenAttackPenalty: number;
   repetitiveCheckPenalty: number;
   majorActivationBonus: number;
@@ -259,6 +261,8 @@ export const defaultAiWeights: AiWeights = {
   highRiskNeutralExchangePenalty: -120,
   hiddenMoverLowValueThreshold: 60,
   hiddenMoverLowValueCapturePenalty: -100,
+  unsafeHiddenRecaptureLossThreshold: 60,
+  unsafeHiddenRecaptureExchangePenalty: -180,
   speculativeHiddenAttackPenalty: -15,
   repetitiveCheckPenalty: -45,
   majorActivationBonus: 45,

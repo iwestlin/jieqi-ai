@@ -7,6 +7,8 @@ import { defaultAiWeights, type AiWeights } from './aiWeights';
 import type { AiLearningPatternId } from './learningPatterns';
 import type { AiMoveTrace, AiRecommendation } from './aiTrace';
 
+type BoardSide = 'left' | 'right';
+
 const openingPawnStarts = createInitialBoard().flatMap((row, rowIndex) =>
   row.flatMap((piece, colIndex) =>
     piece?.originalType === 'pawn'
@@ -64,6 +66,10 @@ type MoveEvaluation = {
   safeCapturePriority: boolean;
   highRiskNeutralExchange: boolean;
   highRiskNeutralExchangePenalty: number;
+  moverMaterialValue: number;
+  hiddenRecaptureMaterialLoss: number;
+  unsafeHiddenRecaptureExchange: boolean;
+  unsafeHiddenRecaptureExchangePenalty: number;
   hiddenMoverExpectedValue: number;
   hiddenMoverLowValueLoss: number;
   hiddenMoverLowValueCapture: boolean;
@@ -137,6 +143,10 @@ type MoveEvaluation = {
   unsafeEndgameCapture: boolean;
   unsafeCaptureExchangeNet: number;
   edgeRookPawnLineLockRisk: boolean;
+  edgeRookThreatSide: BoardSide | null;
+  threatenedPawnLineCol: number | null;
+  sameSideEdgeRookHorseGuard: boolean;
+  directPawnLineRookThreat: boolean;
   horsePawnLineGuard: boolean;
   pawnSoldierDelayedByEdgeRookPressure: boolean;
   safetyGateTriggered: boolean;
@@ -997,18 +1007,6 @@ function enemyOpeningEdgeCannonCols(board: Board, side: Side): number[] {
   return [...cols];
 }
 
-function hasOpeningEdgeRookPawnLineLockRisk(board: Board, side: Side): boolean {
-  if (enemyOpeningEdgeRookCols(board, side).length > 0) return true;
-  const enemy = opponent(side);
-  return board.some((row, rowIndex) => row.some((piece, col) =>
-    piece?.side === enemy &&
-    piece.revealed &&
-    piece.originalType === 'pawn' &&
-    piece.realType === 'rook' &&
-    (col === 0 || col === 8 || Math.abs(rowIndex - ownPawnLineRow(side)) <= 2)
-  ));
-}
-
 function enemyOpeningEdgeRookCols(board: Board, side: Side): number[] {
   const enemy = opponent(side);
   const cols = new Set<number>();
@@ -1027,6 +1025,69 @@ function enemyOpeningEdgeRookCols(board: Board, side: Side): number[] {
     }
   }
   return [...cols];
+}
+
+function boardSideForCol(col: number): BoardSide | null {
+  if (col <= 2) return 'left';
+  if (col >= 6) return 'right';
+  return null;
+}
+
+function edgeColForSide(side: BoardSide): number {
+  return side === 'left' ? 0 : 8;
+}
+
+function pawnLineColForSide(side: BoardSide): number {
+  return side === 'left' ? 2 : 6;
+}
+
+function enemyOpeningEdgeRookThreatSides(board: Board, side: Side): BoardSide[] {
+  const sides = new Set<BoardSide>();
+  for (const col of enemyOpeningEdgeRookCols(board, side)) {
+    const threatSide = boardSideForCol(col);
+    if (threatSide) sides.add(threatSide);
+  }
+  return [...sides];
+}
+
+function horseReleaseSide(from: Position, to: Position): BoardSide | null {
+  return boardSideForCol(from.col) ?? boardSideForCol(to.col);
+}
+
+function directPawnLineRookThreatCols(board: Board, side: Side): number[] {
+  const enemy = opponent(side);
+  const pawnRow = ownPawnLineRow(side);
+  const cols: number[] = [];
+
+  for (const col of [2, 6]) {
+    const pawn = board[pawnRow]?.[col];
+    if (!(pawn?.side === side && !pawn.revealed && pawn.originalType === 'pawn')) continue;
+
+    const attacked = getAllLegalMoves(board, enemy).some(move =>
+      samePosition(move.to, { row: pawnRow, col }) &&
+      move.captured === pawn &&
+      move.piece.side === enemy &&
+      move.piece.revealed &&
+      publicType(move.piece) === 'rook'
+    );
+    if (attacked) cols.push(col);
+  }
+
+  return cols;
+}
+
+function directPawnLineRookThreatSides(board: Board, side: Side): BoardSide[] {
+  const sides = new Set<BoardSide>();
+  for (const col of directPawnLineRookThreatCols(board, side)) {
+    const threatSide = boardSideForCol(col);
+    if (threatSide) sides.add(threatSide);
+  }
+  return [...sides];
+}
+
+function hasOpeningEdgeRookPawnLineLockRisk(board: Board, side: Side): boolean {
+  return enemyOpeningEdgeRookThreatSides(board, side).length > 0 ||
+    directPawnLineRookThreatSides(board, side).length > 0;
 }
 
 function isHorseReleaseForCannonPressure(side: Side, to: Position): boolean {
@@ -1119,6 +1180,10 @@ function structurePatternEvaluation(state: GameState, move: Move, nextBoard: Boa
   preventsPawnLineLock: boolean;
   badHorseRelease: boolean;
   horsePawnLineGuard: boolean;
+  edgeRookThreatSide: BoardSide | null;
+  threatenedPawnLineCol: number | null;
+  sameSideEdgeRookHorseGuard: boolean;
+  directPawnLineRookThreat: boolean;
 } {
   if (!isOpeningPhase(state, weights)) {
     return {
@@ -1132,6 +1197,10 @@ function structurePatternEvaluation(state: GameState, move: Move, nextBoard: Boa
       preventsPawnLineLock: false,
       badHorseRelease: false,
       horsePawnLineGuard: false,
+      edgeRookThreatSide: null,
+      threatenedPawnLineCol: null,
+      sameSideEdgeRookHorseGuard: false,
+      directPawnLineRookThreat: false,
     };
   }
 
@@ -1147,6 +1216,10 @@ function structurePatternEvaluation(state: GameState, move: Move, nextBoard: Boa
       preventsPawnLineLock: false,
       badHorseRelease: false,
       horsePawnLineGuard: false,
+      edgeRookThreatSide: null,
+      threatenedPawnLineCol: null,
+      sameSideEdgeRookHorseGuard: false,
+      directPawnLineRookThreat: false,
     };
   }
 
@@ -1154,14 +1227,34 @@ function structurePatternEvaluation(state: GameState, move: Move, nextBoard: Boa
   const afterCannonThreat = cannonLineThreatAgainstSide(nextBoard, state.turn, weights);
   const beforePawnLineRisk = enemyRookOnPawnLineRisk(state.board, state.turn);
   const afterPawnLineRisk = enemyRookOnPawnLineRisk(nextBoard, state.turn);
+  const edgeRookThreatSides = enemyOpeningEdgeRookThreatSides(state.board, state.turn);
+  const directThreatCols = directPawnLineRookThreatCols(state.board, state.turn);
+  const directThreatSides = directThreatCols
+    .map(col => boardSideForCol(col))
+    .filter((side): side is BoardSide => side != null);
   const releasedHorse = isReleasedHorseMove(move);
   const releasedElephant = isReleasedElephantMove(move);
   const pawnLineDefense = guardsPawnLineKeyPoint(state.turn, move.to);
   const edgeCannonPressure = hasOpeningEdgeCannonPressure(state.board, state.turn) && beforeCannonThreat > 0;
-  const edgeRookPawnLineLockRisk = hasOpeningEdgeRookPawnLineLockRisk(state.board, state.turn) || beforePawnLineRisk > 0;
+  const directPawnLineRookThreat = directThreatSides.length > 0;
+  const edgeRookPawnLineLockRisk = edgeRookThreatSides.length > 0 || directPawnLineRookThreat;
   const horseCannonRelease = releasedHorse && edgeCannonPressure && isHorseReleaseForCannonPressure(state.turn, move.to);
   const elephantCannonRelease = releasedElephant && edgeCannonPressure && isElephantReleaseForCannonPressure(state.turn, move.to);
-  const horsePawnLineGuard = releasedHorse && edgeRookPawnLineLockRisk && isHorseReleaseForPawnLineGuard(state.turn, move.to);
+  const releaseSide = releasedHorse ? horseReleaseSide(move.from, move.to) : null;
+  const sameSideEdgeRookHorseGuard = releasedHorse &&
+    edgeRookThreatSides.some(threatSide => releaseSide === threatSide);
+  const sameSideDirectPawnLineGuard = releasedHorse &&
+    directThreatSides.some(threatSide => releaseSide === threatSide);
+  const horsePawnLineGuard =
+    releasedHorse &&
+    isHorseReleaseForPawnLineGuard(state.turn, move.to) &&
+    (sameSideEdgeRookHorseGuard || sameSideDirectPawnLineGuard);
+  const edgeRookThreatSide = sameSideEdgeRookHorseGuard && releaseSide
+    ? releaseSide
+    : edgeRookThreatSides[0] ?? null;
+  const threatenedPawnLineCol = sameSideDirectPawnLineGuard && releaseSide
+    ? pawnLineColForSide(releaseSide)
+    : directThreatCols[0] ?? null;
   const threatMismatch =
     releasedHorse &&
     (
@@ -1232,6 +1325,10 @@ function structurePatternEvaluation(state: GameState, move: Move, nextBoard: Boa
     preventsPawnLineLock,
     badHorseRelease,
     horsePawnLineGuard,
+    edgeRookThreatSide,
+    threatenedPawnLineCol,
+    sameSideEdgeRookHorseGuard,
+    directPawnLineRookThreat,
   };
 }
 
@@ -1881,6 +1978,17 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     !blocksImmediateWin &&
     !effectiveCheck &&
     hiddenMajorCanRecaptureAt(nextBoard, opponent(state.turn), move.to);
+  const moverMaterialValue = Math.round(defensiveTargetValue(move.piece, state.board, move.from, weights));
+  const hiddenRecaptureMaterialLoss = moverMaterialValue - captureGain;
+  const unsafeHiddenRecaptureExchange =
+    captureGain > 0 &&
+    hiddenMajorRecaptureRisk &&
+    hiddenRecaptureMaterialLoss >= weights.unsafeHiddenRecaptureLossThreshold &&
+    !blocksImmediateWin &&
+    next.status !== winningStatus(state.turn);
+  const unsafeHiddenRecaptureExchangePenalty = unsafeHiddenRecaptureExchange
+    ? weights.unsafeHiddenRecaptureExchangePenalty
+    : 0;
   const highRiskNeutralExchange =
     hiddenMajorRecaptureRisk &&
     exchangeNet <= 0 &&
@@ -1896,7 +2004,8 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     exchangeNet > 0 &&
     !highRiskNeutralExchange &&
     !hiddenMoverLowValueCapture &&
-    !prematureHiddenMajorLowHiddenCapture;
+    !prematureHiddenMajorLowHiddenCapture &&
+    !unsafeHiddenRecaptureExchange;
   const hasClearGain =
     blocksImmediateWin ||
     (effectiveCheck && !unsafeMaterialCheck) ||
@@ -1987,14 +2096,16 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     exchangeNet > 0 &&
     !highRiskNeutralExchange &&
     !hiddenMoverLowValueCapture &&
-    !prematureHiddenMajorLowHiddenCapture;
+    !prematureHiddenMajorLowHiddenCapture &&
+    !unsafeHiddenRecaptureExchange;
   const safeCapturePriorityBonus = safeCapturePriority ? weights.safeCapturePriorityBonus : 0;
   // 明大子吃子優先（Req A/B）
   const revealedMajorCaptureAvailable = posRevealedMajorCaptureAvailable;
   const safeRevealedMajorCapture = !!move.captured && move.captured.revealed &&
     (publicType(move.captured) === 'rook' || publicType(move.captured) === 'cannon') &&
     exchangeNet > 0 &&
-    !highRiskNeutralExchange;
+    !highRiskNeutralExchange &&
+    !unsafeHiddenRecaptureExchange;
   const safeRevealedRookCapture = safeRevealedMajorCapture && publicType(move.captured!) === 'rook';
   const revealedMajorCaptureScore = safeRevealedMajorCapture
     ? (safeRevealedRookCapture
@@ -2004,8 +2115,7 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
   // 暗兵卒開發延後（Req C）
   const pawnSoldierDelayedByMajorCapture = pawnSoldierDevelopment && revealedMajorCaptureAvailable;
   const pawnSoldierDelayPenalty = pawnSoldierDelayedByMajorCapture ? weights.pawnSoldierDelayWhenMajorCaptureAvailablePenalty : 0;
-  const unsafeCaptureExchangeNet = captureGain -
-    Math.round(defensiveTargetValue(move.piece, state.board, move.from, weights));
+  const unsafeCaptureExchangeNet = captureGain - moverMaterialValue;
   const unsafeEndgameCapture = hiddenMajorRecaptureRisk &&
     unsafeCaptureExchangeNet < 0 &&
     !isSquareProtectedBySide(nextBoard, state.turn, move.to);
@@ -2103,7 +2213,7 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
 
   // Edge rook pressure: boost horse guard moves, penalize plain pawn development that ignores edge rook
   const horsePawnLineGuardEdgeRookBonus =
-    pawnSoldiersStillDeveloping && structure.horsePawnLineGuard && edgeRookPressure
+    pawnSoldiersStillDeveloping && structure.horsePawnLineGuard && (edgeRookPressure || structure.directPawnLineRookThreat)
       ? weights.horsePawnLineGuardEdgeRookBonus + weights.pawnLineDefenseBonus + weights.preventEnemyRookPawnLineLockBonus
       : 0;
   const pawnSoldierDelayedByEdgeRookPressure =
@@ -2321,11 +2431,14 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
   // 沒有實際斬獲的「光威脅」預設視為無成果強制步。
   const forcingMoveRealProgress = forcingMove && (
     blocksImmediateWin ||
-    (captureGain > 0 && exchangeNet > 0 && !highRiskNeutralExchange && !hiddenMoverLowValueCapture) ||
-    (!unsafeMaterialCheck && checkingQuality !== 'none' && checkingQuality !== 'meaninglessCheck') ||
-    resolvedHighValueThreat ||
-    multiPurposeDefense ||
-    endgamePlan.restrictKingMobility
+    next.status === winningStatus(state.turn) ||
+    (!unsafeHiddenRecaptureExchange && (
+      (captureGain > 0 && exchangeNet > 0 && !highRiskNeutralExchange && !hiddenMoverLowValueCapture) ||
+      (!unsafeMaterialCheck && checkingQuality !== 'none' && checkingQuality !== 'meaninglessCheck') ||
+      resolvedHighValueThreat ||
+      multiPurposeDefense ||
+      endgamePlan.restrictKingMobility
+    ))
   );
 
   const forcingMoveQuality: 'productive' | 'neutral' | 'unproductive' | 'repetitive' | 'cycle' =
@@ -2393,6 +2506,7 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     checkPenalty +
     safeCapturePriorityBonus +
     highRiskNeutralExchangePenalty +
+    unsafeHiddenRecaptureExchangePenalty +
     hiddenMoverLowValueCapturePenalty +
     prematureHiddenMajorLowHiddenCapturePenalty +
     hiddenRevealMateDefensePenalty +
@@ -2486,6 +2600,10 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     safeCapturePriority,
     highRiskNeutralExchange,
     highRiskNeutralExchangePenalty,
+    moverMaterialValue,
+    hiddenRecaptureMaterialLoss,
+    unsafeHiddenRecaptureExchange,
+    unsafeHiddenRecaptureExchangePenalty,
     hiddenMoverExpectedValue,
     hiddenMoverLowValueLoss,
     hiddenMoverLowValueCapture,
@@ -2559,6 +2677,10 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     unsafeEndgameCapture,
     unsafeCaptureExchangeNet,
     edgeRookPawnLineLockRisk: structure.horsePawnLineGuard ? true : edgeRookPressure,
+    edgeRookThreatSide: structure.edgeRookThreatSide,
+    threatenedPawnLineCol: structure.threatenedPawnLineCol,
+    sameSideEdgeRookHorseGuard: structure.sameSideEdgeRookHorseGuard,
+    directPawnLineRookThreat: structure.directPawnLineRookThreat,
     horsePawnLineGuard: structure.horsePawnLineGuard,
     pawnSoldierDelayedByEdgeRookPressure,
     safetyGateTriggered,
@@ -2650,6 +2772,7 @@ function reasonFor(best: Move, evaluation: MoveEvaluation, avoidedOpponentWin: b
   if (evaluation.hangingMove) return '落點缺少保護，已扣分';
   if (evaluation.advisorRevealClogRisk && evaluation.advisorRevealClogPenalty < 0) return '暗士翻子易卡住將門，已扣分';
   if (evaluation.revealChoiceRisk) return '吃低價暗子後給對方選擇權，已降分';
+  if (evaluation.unsafeHiddenRecaptureExchange) return '明大子吃低價子後可遭暗大子回吃，交換不利';
   if (evaluation.highRiskNeutralExchange) return '高風險等價交換：未取得淨收益';
   if (evaluation.hiddenMoverLowValueCapture) return '高價暗子主動吃低價目標，交換期望不利';
   if (evaluation.pawnSoldierSelfSacrifice) return '暗兵卒走入明兵卒攻擊範圍，交換必虧';
@@ -2882,6 +3005,10 @@ export function recommendMove(
     safeCapturePriority: evaluation.safeCapturePriority,
     highRiskNeutralExchange: evaluation.highRiskNeutralExchange,
     highRiskNeutralExchangePenalty: evaluation.highRiskNeutralExchangePenalty,
+    moverMaterialValue: evaluation.moverMaterialValue,
+    hiddenRecaptureMaterialLoss: evaluation.hiddenRecaptureMaterialLoss,
+    unsafeHiddenRecaptureExchange: evaluation.unsafeHiddenRecaptureExchange,
+    unsafeHiddenRecaptureExchangePenalty: evaluation.unsafeHiddenRecaptureExchangePenalty,
     hiddenMoverExpectedValue: evaluation.hiddenMoverExpectedValue,
     hiddenMoverLowValueLoss: evaluation.hiddenMoverLowValueLoss,
     hiddenMoverLowValueCapture: evaluation.hiddenMoverLowValueCapture,
@@ -2954,6 +3081,10 @@ export function recommendMove(
     unsafeEndgameCapture: evaluation.unsafeEndgameCapture,
     unsafeCaptureExchangeNet: evaluation.unsafeCaptureExchangeNet,
     edgeRookPawnLineLockRisk: evaluation.edgeRookPawnLineLockRisk,
+    edgeRookThreatSide: evaluation.edgeRookThreatSide,
+    threatenedPawnLineCol: evaluation.threatenedPawnLineCol,
+    sameSideEdgeRookHorseGuard: evaluation.sameSideEdgeRookHorseGuard,
+    directPawnLineRookThreat: evaluation.directPawnLineRookThreat,
     horsePawnLineGuard: evaluation.horsePawnLineGuard,
     pawnSoldierDelayedByEdgeRookPressure: evaluation.pawnSoldierDelayedByEdgeRookPressure,
     safetyGateTriggered: evaluation.safetyGateTriggered,

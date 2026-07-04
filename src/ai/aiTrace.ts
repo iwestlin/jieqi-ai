@@ -39,6 +39,10 @@ export type AiMoveTrace = {
   safeCapturePriority: boolean;
   highRiskNeutralExchange?: boolean;
   highRiskNeutralExchangePenalty?: number;
+  moverMaterialValue?: number;
+  hiddenRecaptureMaterialLoss?: number;
+  unsafeHiddenRecaptureExchange?: boolean;
+  unsafeHiddenRecaptureExchangePenalty?: number;
   hiddenMoverExpectedValue?: number;
   hiddenMoverLowValueLoss?: number;
   hiddenMoverLowValueCapture?: boolean;
@@ -111,6 +115,10 @@ export type AiMoveTrace = {
   unsafeEndgameCapture?: boolean;
   unsafeCaptureExchangeNet?: number;
   edgeRookPawnLineLockRisk?: boolean;
+  edgeRookThreatSide?: 'left' | 'right' | null;
+  threatenedPawnLineCol?: number | null;
+  sameSideEdgeRookHorseGuard?: boolean;
+  directPawnLineRookThreat?: boolean;
   horsePawnLineGuard?: boolean;
   pawnSoldierDelayedByEdgeRookPressure?: boolean;
   decisionLayer?: number;

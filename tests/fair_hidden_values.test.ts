@@ -73,6 +73,34 @@ function singleTrace(state: GameState, move: Move) {
   return result.traces[0];
 }
 
+function tracesFor(state: GameState, moves: Move[]) {
+  const result = recommendMove(state, moves);
+  assertOk(result.traces);
+  return result.traces;
+}
+
+function traceForMove(state: GameState, move: Move) {
+  const traces = tracesFor(state, [move]);
+  assertOk(traces[0]);
+  return traces[0];
+}
+
+function baseHorseGuardBoard(): Board {
+  const board = emptyBoard();
+  place(board, 9, 4, piece('red', 'king'));
+  place(board, 0, 4, piece('black', 'king'));
+  place(board, 5, 4, piece('red', 'pawn', 'pawn', true));
+  place(board, 9, 1, piece('red', 'horse', 'horse', false));
+  place(board, 9, 7, piece('red', 'horse', 'horse', false));
+  return board;
+}
+
+function horseGuardTrace(board: Board, from: [number, number], to: [number, number]) {
+  const state: GameState = { board, turn: 'red', history: [], status: 'playing' };
+  const move = findMove(board, 'red', from, to);
+  return traceForMove(state, move);
+}
+
 test('capturing hidden advisor and hidden horse uses the same expected material value', () => {
   const advisorCase = stateWithHiddenTarget('advisor');
   const horseCase = stateWithHiddenTarget('horse');
@@ -196,5 +224,118 @@ test('net-positive revealed major capture is still safe', () => {
   assertEqual(trace.prematureHiddenMajorLowHiddenCapture, false);
   assertEqual(trace.hasClearGain, true);
   assertEqual(trace.safeCapturePriority, true);
+  assertEqual(trace.safeRevealedMajorCapture, true);
+});
+
+test('left edge rook only gives same-side horse pawn-line guard bonus', () => {
+  const board = baseHorseGuardBoard();
+  place(board, 6, 0, piece('black', 'pawn', 'rook', true));
+
+  const leftTrace = horseGuardTrace(board, [9, 1], [7, 2]);
+  const rightTrace = horseGuardTrace(board, [9, 7], [7, 6]);
+
+  assertEqual(leftTrace.edgeRookThreatSide, 'left');
+  assertEqual(leftTrace.sameSideEdgeRookHorseGuard, true);
+  assertEqual(leftTrace.horsePawnLineGuard, true);
+  assertEqual(rightTrace.edgeRookThreatSide, 'left');
+  assertEqual(rightTrace.sameSideEdgeRookHorseGuard, false);
+  assertEqual(rightTrace.horsePawnLineGuard, false);
+});
+
+test('right edge rook only gives same-side horse pawn-line guard bonus', () => {
+  const board = baseHorseGuardBoard();
+  place(board, 6, 8, piece('black', 'pawn', 'rook', true));
+
+  const leftTrace = horseGuardTrace(board, [9, 1], [7, 2]);
+  const rightTrace = horseGuardTrace(board, [9, 7], [7, 6]);
+
+  assertEqual(rightTrace.edgeRookThreatSide, 'right');
+  assertEqual(rightTrace.sameSideEdgeRookHorseGuard, true);
+  assertEqual(rightTrace.horsePawnLineGuard, true);
+  assertEqual(leftTrace.edgeRookThreatSide, 'right');
+  assertEqual(leftTrace.sameSideEdgeRookHorseGuard, false);
+  assertEqual(leftTrace.horsePawnLineGuard, false);
+});
+
+test('edge rook attacking edge pawn is not a direct third-seventh pawn-line threat', () => {
+  const board = baseHorseGuardBoard();
+  place(board, 6, 0, piece('red', 'pawn', 'pawn', false));
+  place(board, 3, 0, piece('black', 'pawn', 'rook', true));
+
+  const trace = horseGuardTrace(board, [9, 1], [7, 2]);
+
+  assertEqual(trace.edgeRookThreatSide, 'left');
+  assertEqual(trace.directPawnLineRookThreat, false);
+  assertEqual(trace.threatenedPawnLineCol, null);
+  assertEqual(trace.sameSideEdgeRookHorseGuard, true);
+});
+
+test('direct rook attack on third-file pawn only gives left horse guard', () => {
+  const board = baseHorseGuardBoard();
+  place(board, 6, 2, piece('red', 'pawn', 'pawn', false));
+  place(board, 3, 2, piece('black', 'rook', 'rook', true));
+
+  const leftTrace = horseGuardTrace(board, [9, 1], [7, 2]);
+  const rightTrace = horseGuardTrace(board, [9, 7], [7, 6]);
+
+  assertEqual(leftTrace.directPawnLineRookThreat, true);
+  assertEqual(leftTrace.threatenedPawnLineCol, 2);
+  assertEqual(leftTrace.horsePawnLineGuard, true);
+  assertEqual(rightTrace.directPawnLineRookThreat, true);
+  assertEqual(rightTrace.threatenedPawnLineCol, 2);
+  assertEqual(rightTrace.horsePawnLineGuard, false);
+});
+
+test('direct rook attack on seventh-file pawn only gives right horse guard', () => {
+  const board = baseHorseGuardBoard();
+  place(board, 6, 6, piece('red', 'pawn', 'pawn', false));
+  place(board, 3, 6, piece('black', 'rook', 'rook', true));
+
+  const leftTrace = horseGuardTrace(board, [9, 1], [7, 2]);
+  const rightTrace = horseGuardTrace(board, [9, 7], [7, 6]);
+
+  assertEqual(rightTrace.directPawnLineRookThreat, true);
+  assertEqual(rightTrace.threatenedPawnLineCol, 6);
+  assertEqual(rightTrace.horsePawnLineGuard, true);
+  assertEqual(leftTrace.directPawnLineRookThreat, true);
+  assertEqual(leftTrace.threatenedPawnLineCol, 6);
+  assertEqual(leftTrace.horsePawnLineGuard, false);
+});
+
+test('revealed rook eating low-value elephant with hidden recapture is unsafe', () => {
+  const board = baseBoard();
+  board[5][4] = null;
+  place(board, 4, 4, piece('red', 'pawn', 'pawn', true));
+  place(board, 5, 1, piece('black', 'elephant', 'elephant', true));
+  place(board, 5, 8, piece('black', 'rook', 'rook', false));
+
+  const state: GameState = { board, turn: 'red', history: [], status: 'playing' };
+  const move = findMove(board, 'red', [5, 0], [5, 1]);
+  const trace = singleTrace(state, move);
+
+  assertEqual(trace.captureGain, defaultAiWeights.elephantTargetValue);
+  assertEqual(trace.moverMaterialValue, defaultAiWeights.pieceValues.rook);
+  assertEqual(trace.hiddenMajorRecaptureRisk, true);
+  assertEqual(trace.hiddenRecaptureMaterialLoss, 360);
+  assertEqual(trace.unsafeHiddenRecaptureExchange, true);
+  assertEqual(trace.unsafeHiddenRecaptureExchangePenalty, defaultAiWeights.unsafeHiddenRecaptureExchangePenalty);
+  assertEqual(trace.safeCapturePriority, false);
+  assertEqual(trace.hasClearGain, false);
+  assertEqual(trace.safeRevealedMajorCapture, false);
+  assertOk(trace.forcingMoveQuality !== 'productive');
+});
+
+test('revealed rook eating revealed rook without hidden recapture remains safe', () => {
+  const board = baseBoard();
+  place(board, 5, 1, piece('black', 'rook', 'rook', true));
+
+  const state: GameState = { board, turn: 'red', history: [], status: 'playing' };
+  const move = findMove(board, 'red', [5, 0], [5, 1]);
+  const trace = singleTrace(state, move);
+
+  assertEqual(trace.unsafeHiddenRecaptureExchange, false);
+  assertEqual(trace.hiddenMajorRecaptureRisk, false);
+  assertEqual(trace.safeCapturePriority, true);
+  assertEqual(trace.hasClearGain, true);
   assertEqual(trace.safeRevealedMajorCapture, true);
 });

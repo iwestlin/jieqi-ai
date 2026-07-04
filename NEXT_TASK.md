@@ -2,6 +2,11 @@
 
 ## Completed This Round
 
+- Split edge-rook pawn-line guard logic by left/right side.
+- Separated 1/9-file edge rook pressure from direct 3/7-file pawn-line rook attacks.
+- Added trace/debug output for edge rook threat side, threatened pawn-line column, same-side horse guard, and direct pawn-line rook threat.
+- Added unsafe hidden recapture exchange scoring for revealed major captures of low-value targets.
+- Added regression tests for side-specific horse guards and unsafe revealed-rook captures.
 - Aligned `hasClearGain` with exchange safety.
 - Moved exchange-risk flags before `hasClearGain` so unsafe exchanges no longer look like clear gains to downstream heuristics.
 - Added `hasClearGain` trace/debug report output.

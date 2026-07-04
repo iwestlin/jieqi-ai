@@ -2,6 +2,21 @@
 
 ## Latest Completed Work
 
+- Split edge-rook pawn-line guard evaluation by board side.
+- 1/9-file revealed edge rooks now keep their threat side (`left` / `right`), so only the same-side hidden horse can receive pawn-line guard credit.
+- 3/7-file pawn-line rook threats are now detected only when an enemy revealed rook legally attacks an unrevealed pawn on that exact pawn-line column.
+- Added AI trace/debug fields:
+  - `edgeRookThreatSide`
+  - `threatenedPawnLineCol`
+  - `sameSideEdgeRookHorseGuard`
+  - `directPawnLineRookThreat`
+- Added unsafe hidden recapture exchange handling for revealed major captures:
+  - computes `moverMaterialValue`
+  - computes `hiddenRecaptureMaterialLoss`
+  - marks `unsafeHiddenRecaptureExchange`
+  - applies `unsafeHiddenRecaptureExchangePenalty`
+- Revealed rook eating a low-value elephant while a hidden major can recapture no longer counts as safe capture, clear gain, or productive forcing progress.
+- Added regression tests for same-side edge rook guards, direct 3/7 pawn-line rook threats, unsafe rook-captures-elephant exchange, and safe rook-captures-rook exchange.
 - Aligned `hasClearGain` with the same exchange-safety gates used by safe captures.
 - Moved hidden-major low-value capture and hidden-major recapture-risk detection before `hasClearGain`.
 - `hasClearGain` now rejects:
