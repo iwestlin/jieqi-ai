@@ -19,6 +19,7 @@ export type AiMoveTrace = {
   openingBonus: number;
   keySquareScore: number;
   hiddenPressureScore: number;
+  hasClearGain?: boolean;
   leaveKeySquareScore: number;
   hiddenRevealMateDefense?: boolean;
   hiddenRevealMateDefensePenalty?: number;

@@ -2,6 +2,10 @@
 
 ## Completed This Round
 
+- Aligned `hasClearGain` with exchange safety.
+- Moved exchange-risk flags before `hasClearGain` so unsafe exchanges no longer look like clear gains to downstream heuristics.
+- Added `hasClearGain` trace/debug report output.
+- Added regression coverage for high-risk neutral exchange, hidden mover low-value capture, and true net-positive exchange.
 - Fixed unsafe exchange and pawn-soldier sacrifice scoring.
 - High-risk equal exchanges with hidden-major recapture risk are no longer marked safe or productive.
 - Safe capture priority now requires real positive exchange value.

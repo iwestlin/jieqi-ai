@@ -2,6 +2,18 @@
 
 ## Latest Completed Work
 
+- Aligned `hasClearGain` with the same exchange-safety gates used by safe captures.
+- Moved hidden-major low-value capture and hidden-major recapture-risk detection before `hasClearGain`.
+- `hasClearGain` now rejects:
+  - `exchangeNet === 0`
+  - high-risk neutral exchanges
+  - hidden mover low-value captures
+  - premature hidden-major captures of low-value hidden targets
+- Added `hasClearGain` to AI trace/debug report output.
+- Expanded unsafe exchange regression tests so:
+  - high-risk neutral exchange has `hasClearGain === false`
+  - hidden rook eating a low-value revealed pawn has `hasClearGain === false`
+  - genuinely net-positive exchange has `hasClearGain === true`
 - Fixed unsafe exchange and pawn-soldier sacrifice scoring in Fair AI.
 - High-risk neutral exchanges now get downgraded when a hidden major can recapture:
   - `exchangeNet <= 0`

@@ -136,6 +136,7 @@ test('high-risk neutral exchange is not safe or productive', () => {
   assertEqual(trace.hiddenMajorRecaptureRisk, true);
   assertEqual(trace.highRiskNeutralExchange, true);
   assertEqual(trace.highRiskNeutralExchangePenalty, defaultAiWeights.highRiskNeutralExchangePenalty);
+  assertEqual(trace.hasClearGain, false);
   assertEqual(trace.safeCapturePriority, false);
   assertEqual(trace.safeRevealedMajorCapture, false);
   assertOk(trace.forcingMoveQuality !== 'productive');
@@ -177,6 +178,7 @@ test('hidden rook eating a revealed pawn is treated as low-value hidden mover ca
   assertEqual(trace.hiddenMoverLowValueLoss, 100);
   assertEqual(trace.hiddenMoverLowValueCapture, true);
   assertEqual(trace.hiddenMoverLowValueCapturePenalty, defaultAiWeights.hiddenMoverLowValueCapturePenalty);
+  assertEqual(trace.hasClearGain, false);
   assertEqual(trace.safeCapturePriority, false);
 });
 
@@ -191,6 +193,8 @@ test('net-positive revealed major capture is still safe', () => {
   assertOk(trace.exchangeNet > 0);
   assertEqual(trace.highRiskNeutralExchange, false);
   assertEqual(trace.hiddenMoverLowValueCapture, false);
+  assertEqual(trace.prematureHiddenMajorLowHiddenCapture, false);
+  assertEqual(trace.hasClearGain, true);
   assertEqual(trace.safeCapturePriority, true);
   assertEqual(trace.safeRevealedMajorCapture, true);
 });

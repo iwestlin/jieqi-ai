@@ -51,6 +51,7 @@ function fmtTrace(t: AiMoveTrace): string {
     '  openingMajorGoal：' + bool(t.openingMajorGoal ?? false),
     '  majorActivation：' + bool(t.majorActivation ?? false),
     '  opponentRevealSuppression：' + bool(t.opponentRevealSuppression ?? false),
+    '  hasClearGain: ' + bool(t.hasClearGain),
     '  highRiskNeutralExchange: ' + bool(t.highRiskNeutralExchange),
     '  highRiskNeutralExchangePenalty: ' + num(t.highRiskNeutralExchangePenalty),
     '  hiddenMoverExpectedValue: ' + num(t.hiddenMoverExpectedValue),

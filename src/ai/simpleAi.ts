@@ -33,6 +33,7 @@ type MoveEvaluation = {
   keySquareScore: number;
   leaveKeySquareScore: number;
   hiddenPressureScore: number;
+  hasClearGain: boolean;
   controlsImportantHidden: boolean;
   structureScore: number;
   structurePatterns: AiLearningPatternId[];
@@ -1851,20 +1852,6 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     }
   }
 
-  const hasClearGain = captureGain >= weights.pieceValues.cannon || blocksImmediateWin || (effectiveCheck && !unsafeMaterialCheck) || (captureGain > 0 && exchangeNet >= 0) || escapeBonus > 0;
-  const leaveKeySquareScore = leaveKeySquarePenalty(state.board, state.turn, move.from, move.to, hasClearGain, weights);
-  const structure = structurePatternEvaluation(state, move, nextBoard, hasClearGain, weights);
-  // Edge cannon pressure: cap hiddenPressureScore for plain pawn moves that don't resolve pressure
-  const edgeCannonPressure = isOpeningPhase(state, weights) && hasOpeningEdgeCannonPressure(state.board, state.turn);
-  const edgeRookPressure = isOpeningPhase(state, weights) && hasOpeningEdgeRookPawnLineLockRisk(state.board, state.turn);
-  const isPlainUnrevealedPawnMove = !move.piece.revealed && move.piece.originalType === 'pawn' &&
-    !structure.releasedHorseFromPressure && !structure.releasedElephantFromPressure &&
-    !structure.preventsPawnLineLock && !structure.pawnLineDefense && captureGain === 0;
-  const edgeCannonPressureUnresolved = edgeCannonPressure && isPlainUnrevealedPawnMove;
-  const cappedHiddenPressureScore = edgeCannonPressureUnresolved
-    ? Math.min(hiddenPressureScore, weights.edgeCannonPressureHiddenPressureCap)
-    : hiddenPressureScore;
-
   // 高價暗子主動吃低外觀暗子：實戰上通常不急著交換。
   // 例如暗車吃黑暗卒，應等對方暗卒翻開後再決定是否用暗車交換。
   const hiddenMajorLowHiddenCapture =
@@ -1889,6 +1876,44 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
   const prematureHiddenMajorLowHiddenCapturePenalty = prematureHiddenMajorLowHiddenCapture
     ? weights.unsafeCapturePenalty
     : 0;
+  // 暗大子回吃風險
+  const hiddenMajorRecaptureRisk = captureGain > 0 &&
+    !blocksImmediateWin &&
+    !effectiveCheck &&
+    hiddenMajorCanRecaptureAt(nextBoard, opponent(state.turn), move.to);
+  const highRiskNeutralExchange =
+    hiddenMajorRecaptureRisk &&
+    exchangeNet <= 0 &&
+    reply.risk >= weights.highRiskExchangeThreshold &&
+    !blocksImmediateWin &&
+    next.status !== winningStatus(state.turn);
+  const highRiskNeutralExchangePenalty = highRiskNeutralExchange
+    ? weights.highRiskNeutralExchangePenalty
+    : 0;
+
+  const riskAdjustedCaptureGain =
+    captureGain > 0 &&
+    exchangeNet > 0 &&
+    !highRiskNeutralExchange &&
+    !hiddenMoverLowValueCapture &&
+    !prematureHiddenMajorLowHiddenCapture;
+  const hasClearGain =
+    blocksImmediateWin ||
+    (effectiveCheck && !unsafeMaterialCheck) ||
+    riskAdjustedCaptureGain ||
+    escapeBonus > 0;
+  const leaveKeySquareScore = leaveKeySquarePenalty(state.board, state.turn, move.from, move.to, hasClearGain, weights);
+  const structure = structurePatternEvaluation(state, move, nextBoard, hasClearGain, weights);
+  // Edge cannon pressure: cap hiddenPressureScore for plain pawn moves that don't resolve pressure
+  const edgeCannonPressure = isOpeningPhase(state, weights) && hasOpeningEdgeCannonPressure(state.board, state.turn);
+  const edgeRookPressure = isOpeningPhase(state, weights) && hasOpeningEdgeRookPawnLineLockRisk(state.board, state.turn);
+  const isPlainUnrevealedPawnMove = !move.piece.revealed && move.piece.originalType === 'pawn' &&
+    !structure.releasedHorseFromPressure && !structure.releasedElephantFromPressure &&
+    !structure.preventsPawnLineLock && !structure.pawnLineDefense && captureGain === 0;
+  const edgeCannonPressureUnresolved = edgeCannonPressure && isPlainUnrevealedPawnMove;
+  const cappedHiddenPressureScore = edgeCannonPressureUnresolved
+    ? Math.min(hiddenPressureScore, weights.edgeCannonPressureHiddenPressureCap)
+    : hiddenPressureScore;
 
   // Speculative hidden cannon attack: penalize unrevealed cannon threatening unrevealed target (no capture)
   const speculativeAttack = !move.piece.revealed && move.piece.originalType === 'cannon' &&
@@ -1956,20 +1981,6 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     : 0;
   const pawnSoldierDevelopmentScore = pawnSoldierSelfSacrifice ? 0 : rawPawnSoldierDevelopmentScore;
   const finalOpeningBonus = pawnSoldierSelfSacrifice ? 0 : openingBonus;
-  // 暗大子回吃風險
-  const hiddenMajorRecaptureRisk = captureGain > 0 &&
-    !blocksImmediateWin &&
-    !effectiveCheck &&
-    hiddenMajorCanRecaptureAt(nextBoard, opponent(state.turn), move.to);
-  const highRiskNeutralExchange =
-    hiddenMajorRecaptureRisk &&
-    exchangeNet <= 0 &&
-    reply.risk >= weights.highRiskExchangeThreshold &&
-    !blocksImmediateWin &&
-    next.status !== winningStatus(state.turn);
-  const highRiskNeutralExchangePenalty = highRiskNeutralExchange
-    ? weights.highRiskNeutralExchangePenalty
-    : 0;
   // Safe capture priority: only net-positive, non-speculative captures are treated as safe.
   const safeCapturePriority =
     captureGain > 0 &&
@@ -2444,6 +2455,7 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
     keySquareScore,
     leaveKeySquareScore,
     hiddenPressureScore,
+    hasClearGain,
     controlsImportantHidden,
     structureScore: finalStructureScore,
     structurePatterns: structure.patterns,
@@ -2850,6 +2862,7 @@ export function recommendMove(
     openingBonus: evaluation.openingBonus,
     keySquareScore: evaluation.keySquareScore,
     hiddenPressureScore: evaluation.hiddenPressureScore,
+    hasClearGain: evaluation.hasClearGain,
     leaveKeySquareScore: evaluation.leaveKeySquareScore,
     hiddenRevealMateDefense: evaluation.hiddenRevealMateDefense,
     hiddenRevealMateDefensePenalty: evaluation.hiddenRevealMateDefensePenalty,
