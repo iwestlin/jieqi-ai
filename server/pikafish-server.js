@@ -8,6 +8,8 @@ const API_PATH = '/api/pikafish-move';
 const DEFAULT_ENGINE_PATH = path.resolve(__dirname, '../Pikafish-jieqi_old/src/PikaJieQi');
 const DEFAULT_HOST = process.env.PIKAFISH_HOST || process.env.HOST || '127.0.0.1';
 const DEFAULT_PORT = Number(process.env.PIKAFISH_PORT || process.env.PORT || 8787);
+const DEFAULT_RATE_LIMIT = Number(process.env.PIKAFISH_RATE_LIMIT || 60);
+const DEFAULT_RATE_INTERVAL_MS = Number(process.env.PIKAFISH_RATE_INTERVAL_MS || 60_000);
 
 class UciEngine {
   constructor(enginePath = process.env.PIKAFISH_ENGINE || DEFAULT_ENGINE_PATH) {
@@ -149,6 +151,49 @@ class UciEngine {
   }
 }
 
+class IpRateLimiter {
+  constructor(limit = DEFAULT_RATE_LIMIT, intervalMs = DEFAULT_RATE_INTERVAL_MS) {
+    this.limit = limit;
+    this.intervalMs = intervalMs;
+    this.requestsByIp = new Map();
+    this.nextCleanupAt = 0;
+  }
+
+  check(ip) {
+    if (this.limit <= 0) return true;
+
+    const now = Date.now();
+    if (now >= this.nextCleanupAt) {
+      this.cleanup(now);
+      this.nextCleanupAt = now + this.intervalMs;
+    }
+
+    const requests = (this.requestsByIp.get(ip) || []).filter(
+      timestamp => timestamp > now - this.intervalMs,
+    );
+    if (requests.length >= this.limit) {
+      this.requestsByIp.set(ip, requests);
+      return false;
+    }
+
+    requests.push(now);
+    this.requestsByIp.set(ip, requests);
+    return true;
+  }
+
+  cleanup(now) {
+    const cutoff = now - this.intervalMs;
+    for (const [ip, requests] of this.requestsByIp) {
+      const activeRequests = requests.filter(timestamp => timestamp > cutoff);
+      if (activeRequests.length) {
+        this.requestsByIp.set(ip, activeRequests);
+      } else {
+        this.requestsByIp.delete(ip);
+      }
+    }
+  }
+}
+
 async function readJsonBody(req) {
   const chunks = [];
   let size = 0;
@@ -186,8 +231,29 @@ function sendJson(res, statusCode, body) {
   res.end(JSON.stringify(body));
 }
 
+function getRequestIp(req) {
+  const realIpValues = req.headers['x-real-ip'];
+  if (Array.isArray(realIpValues) && realIpValues.length) {
+    const realIp = realIpValues[0].trim();
+    if (realIp) return realIp;
+  } else if (typeof realIpValues === 'string' && realIpValues.trim()) {
+    return realIpValues.trim();
+  }
+
+  return req.socket.remoteAddress || 'unknown';
+}
+
+function checkRateLimit(req, res, rateLimiter) {
+  if (rateLimiter.check(getRequestIp(req))) return true;
+
+  res.setHeader('Retry-After', Math.ceil(rateLimiter.intervalMs / 1000));
+  sendJson(res, 429, { error: 'Too many requests' });
+  return false;
+}
+
 function createPikafishService(options = {}) {
   const engine = options.engine || new UciEngine(options.enginePath);
+  const rateLimiter = options.rateLimiter || new IpRateLimiter();
 
   async function requestHandler(req, res) {
     applyCors(res);
@@ -200,6 +266,7 @@ function createPikafishService(options = {}) {
 
     try {
       if (req.method !== 'POST') throw new Error('Method not allowed');
+      if (!checkRateLimit(req, res, rateLimiter)) return;
       const request = await readJsonBody(req);
       const result = await engine.request(request);
       sendJson(res, 200, result);
@@ -212,16 +279,19 @@ function createPikafishService(options = {}) {
   return {
     engine,
     requestHandler,
+    rateLimiter,
   };
 }
 
 function createPikafishServer(options = {}) {
   const service = createPikafishService(options);
+  const { rateLimiter } = service;
   const server = http.createServer(async (req, res) => {
     applyCors(res);
     const pathname = new URL(req.url || '/', 'http://localhost').pathname;
 
     if (req.method === 'GET' && pathname === '/healthz') {
+      if (!checkRateLimit(req, res, rateLimiter)) return;
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -297,6 +367,7 @@ module.exports = {
   API_PATH,
   DEFAULT_ENGINE_PATH,
   UciEngine,
+  IpRateLimiter,
   createPikafishService,
   createPikafishServer,
   startPikafishServer,
