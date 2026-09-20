@@ -21,7 +21,7 @@ export const pieceTypeNames: Record<Side, Record<PieceType, string>> = {
     elephant: '象',
     rook: '車',
     horse: '馬',
-    cannon: '包',
+    cannon: '炮',
     pawn: '卒',
   },
 };
@@ -32,7 +32,7 @@ export const editorPieceTypeNames: Record<PieceType, string> = {
   elephant: '相/象',
   rook: '車',
   horse: '馬',
-  cannon: '炮/包',
+  cannon: '炮',
   pawn: '兵/卒',
 };
 

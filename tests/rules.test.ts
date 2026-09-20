@@ -431,11 +431,11 @@ test('move notation uses Tiantian Xiangqi file order and hidden prefix', () => {
   }), '卒1進1');
 });
 
-test('cannon display uses red cannon and black bao labels', () => {
+test('cannon display uses the same label for both sides', () => {
   assertEqual(realPieceName(piece('red', 'cannon')), '炮');
-  assertEqual(realPieceName(piece('black', 'cannon')), '包');
+  assertEqual(realPieceName(piece('black', 'cannon')), '炮');
   assertEqual(moveText({ from: { row: 9, col: 7 }, to: { row: 8, col: 7 }, piece: piece('red', 'cannon') }), '炮二進一');
-  assertEqual(moveText({ from: { row: 0, col: 1 }, to: { row: 1, col: 1 }, piece: piece('black', 'cannon') }), '包2進1');
+  assertEqual(moveText({ from: { row: 0, col: 1 }, to: { row: 1, col: 1 }, piece: piece('black', 'cannon') }), '炮2進1');
 });
 
 test('capture notation distinguishes revealed and hidden captured pieces', () => {
@@ -449,7 +449,7 @@ test('capture notation distinguishes revealed and hidden captured pieces', () =>
   });
   assertEqual(revealedCapture.includes('吃黑馬'), true);
 
-  const hiddenBlackBaoCapture = moveText({
+  const hiddenBlackCannonCapture = moveText({
     from: { row: 5, col: 0 },
     to: { row: 5, col: 1 },
     piece: piece('red', 'rook'),
@@ -457,7 +457,7 @@ test('capture notation distinguishes revealed and hidden captured pieces', () =>
     capturedWasHidden: true,
     captureKind: 'hidden',
   });
-  assertEqual(hiddenBlackBaoCapture.includes('吃黑暗子（翻出包）'), true);
+  assertEqual(hiddenBlackCannonCapture.includes('吃黑暗子（翻出炮）'), true);
 
   const hiddenRedCannonCapture = moveText({
     from: { row: 4, col: 0 },
@@ -529,8 +529,8 @@ test('captured pieces helper groups captures by side and hidden state', () => {
   const captured = getCapturedPieces(history);
   assertEqual(captured.red.revealed[0].label, '\u70ae');
   assertEqual(captured.red.hidden[0].label, `\u6697\u5b50\uff08\u7ffb\u51fa${'\u70ae'}\uff09`);
-  assertEqual(captured.black.revealed[0].label, '\u5305');
-  assertEqual(captured.black.hidden[0].label, `\u6697\u5b50\uff08\u7ffb\u51fa${'\u5305'}\uff09`);
+  assertEqual(captured.black.revealed[0].label, '\u70ae');
+  assertEqual(captured.black.hidden[0].label, `\u6697\u5b50\uff08\u7ffb\u51fa${'\u70ae'}\uff09`);
 });
 
 test('captured board stacks put black captures at top left and red captures at bottom left', () => {
@@ -572,7 +572,7 @@ test('captured board stacks mark hidden captures as translucent candidates', () 
   assertEqual(stacks.bottomLeft[0].name, realPieceName(piece('black', 'pawn', 'horse', false)));
 });
 
-test('captured board stacks show cannon or bao by captured side', () => {
+test('captured board stacks show cannon for both sides', () => {
   const stacks = getCapturedBoardStacks([
     {
       from: { row: 5, col: 0 },
@@ -592,7 +592,7 @@ test('captured board stacks show cannon or bao by captured side', () => {
     },
   ]);
   assertEqual(stacks.topRight[0].name, '\u70ae');
-  assertEqual(stacks.bottomLeft[0].name, '\u5305');
+  assertEqual(stacks.bottomLeft[0].name, '\u70ae');
 });
 
 test('captured board stacks do not change move list notation data', () => {
@@ -2768,8 +2768,8 @@ test('formatAiDebugReport: board snapshot shows revealed pieces and hidden piece
   const text = formatAiDebugReport({ modeName: 'test', state, recommendation: r });
   // Revealed red rook shows as 紅車
   assertOk(text.includes('紅車'));
-  // Hidden black cannon shows as 黑暗包
-  assertOk(text.includes('黑暗包'));
+  // Hidden black cannon shows as 黑暗炮
+  assertOk(text.includes('黑暗炮'));
   // Empty cells show as ··
   assertOk(text.includes('··'));
 });

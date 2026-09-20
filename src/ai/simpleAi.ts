@@ -2143,7 +2143,7 @@ function evaluateMove(state: GameState, move: Move, blocksImmediateWin: boolean,
   let horseMobilityAdjustment = 0;
 
   // 暗子一動會翻開，但評估時不可直接把它當 originalType 的炮/馬吃功能加分。
-  // 例如暗包移動後不能先拿「炮有炮架」加分；必須等完整牌池/最差翻出系統再處理。
+  // 例如暗炮移動後不能先拿「炮有炮架」加分；必須等完整牌池/最差翻出系統再處理。
   if (!moveRevealsUnknown && moved.revealed) {
     if (movedPieceType === 'cannon') {
       cannonFrameAdjustment = cannonFrameAdjust(nextBoard, move.to, weights);
@@ -3092,7 +3092,7 @@ function reasonFor(best: Move, evaluation: MoveEvaluation, avoidedOpponentWin: b
   if (evaluation.dynamicValuePhase === 'endgame' && evaluation.dynamicMoverValue > 0 && evaluation.horseMobilityAdjustment > 0) return '殘局馬活性較高，交換評估上修';
   if (evaluation.cannonFrameAdjustment > 0) return '炮有有效炮架，價值上修';
   if (evaluation.cannonFrameAdjustment < 0) return '炮架不足，炮價值下修';
-  const typeLabel: Record<PieceType, string> = { king: '帥/將', advisor: '仕/士', elephant: '相/象', rook: '車', horse: '馬', cannon: '炮/包', pawn: '兵/卒' };
+  const typeLabel: Record<PieceType, string> = { king: '帥/將', advisor: '仕/士', elephant: '相/象', rook: '車', horse: '馬', cannon: '炮', pawn: '兵/卒' };
   const newThreat = evaluation.threatValue >= weights.pieceValues.horse && (evaluation.threatDelta > 0 || evaluation.threatByMovedPiece);
   if (newThreat && evaluation.threatByMovedPiece && evaluation.threatTargetType) return `此步直接威脅對方${typeLabel[evaluation.threatTargetType]}`;
   if (newThreat && evaluation.threatDelta > 0) return '形成新的高價威脅';
