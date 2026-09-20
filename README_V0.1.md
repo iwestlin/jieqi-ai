@@ -33,7 +33,7 @@ http://localhost:5173
 ## Pikafish-jieqi_old AI
 
 - `人 vs AI 測試` 和 `AiPanel` 已接上 `Pikafish-jieqi_old/src/PikaJieQi` 的 UCI 引擎。
-- Vite 開發伺服器和 `vite preview` 會自動啟動 `/api/pikafish-move` 本機橋接服務。
+- API 實作位於 `server/pikafish-server.js`；`vite dev`、`vite preview` 會自動接入本機橋接服務，也可用 `node server/pikafish-server.js` 獨立啟動。
 - 客戶端只送出公平可見資訊：明子送真實棋型，暗子送 `x/X`，剩餘暗子池由歷史翻子和暗子被吃結果計算。
 - 若引擎不可用，對局會退回原本的 `recommendMoveFair()`，並在 AI 說明中顯示失敗原因。
 
