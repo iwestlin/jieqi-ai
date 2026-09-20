@@ -30,6 +30,18 @@ http://localhost:5173
 - 基礎局面編輯：選取棋子後可調整真實棋種、明暗狀態、清除棋子
 - 簡易 AI 建議，但尚未是完整公平分析器
 
+## Pikafish-jieqi_old AI
+
+- `人 vs AI 測試` 和 `AiPanel` 已接上 `Pikafish-jieqi_old/src/PikaJieQi` 的 UCI 引擎。
+- Vite 開發伺服器和 `vite preview` 會自動啟動 `/api/pikafish-move` 本機橋接服務。
+- 客戶端只送出公平可見資訊：明子送真實棋型，暗子送 `x/X`，剩餘暗子池由歷史翻子和暗子被吃結果計算。
+- 若引擎不可用，對局會退回原本的 `recommendMoveFair()`，並在 AI 說明中顯示失敗原因。
+
+## 授權
+
+- `Pikafish-jieqi_old` 基於 Pikafish，並依 **GNU General Public License v3 (GPL-3.0)** 授權；完整條款見 `Pikafish-jieqi_old/COPYING.txt`。
+- 若重新分發 Pikafish 引擎或其修改版，必須遵循 GPL-3.0，並提供對應的授權與原始碼。
+
 ## 測試
 
 ```bash

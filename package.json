@@ -2,7 +2,7 @@
   "scripts": {
     "dev": "vite",
     "build": "npx tsc && npx vite build",
-    "test": "npx tsc -p tsconfig.test.json && node .tmp-tests/tests/rules.test.js && node .tmp-tests/tests/fair_hidden_values.test.js",
+    "test": "npx tsc -p tsconfig.test.json && node .tmp-tests/tests/rules.test.js && node .tmp-tests/tests/fair_hidden_values.test.js && node .tmp-tests/tests/pikafishBridge.test.js",
     "preview": "vite preview"
   },
   "dependencies": {

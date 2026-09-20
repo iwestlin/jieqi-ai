@@ -8,6 +8,7 @@ import { playBoardSoundFeedback } from '../game/soundEffects';
 import { playEndgameSound } from '../game/endgameSound';
 import { getEndgameFeedback, statusLabel } from '../game/endgameFeedback';
 import { recommendMoveFair } from '../ai/simpleAi';
+import { pikafishMoveToPosition, requestPikafishMove } from '../ai/pikafishBridge';
 import { moveText } from '../game/moveNotation';
 import { createGameRecord, saveGameRecord } from '../game/gameRecord';
 import type { RecordStorage } from '../game/gameRecord';
@@ -104,49 +105,92 @@ export function HumanVsAiPanel({ onHome, storage }: Props) {
     if (gameState.turn !== aiSide) return;
     if (aiThinking) return;
 
+    let cancelled = false;
+    let abortController: AbortController | null = null;
+
     setAiThinking(true);
     const id = setTimeout(() => {
       const current = gameStateRef.current;
-      if (current.status !== 'playing') { setAiThinking(false); return; }
-      // Guard: abort if turn changed (e.g. undo fired during 400ms delay)
-      if (current.turn !== aiSide) { setAiThinking(false); return; }
+      if (current.status !== 'playing' || current.turn !== aiSide) {
+        if (!cancelled) setAiThinking(false);
+        return;
+      }
       const legal = getAllLegalMoves(current.board, current.turn);
       const allowed = filterThirdRepetitionMoves(current, pastRef.current, legal);
       const candidates = allowed.length ? allowed : legal;
-      const r = recommendMoveFair(current);
-      if (!r.move) {
-        // Stalemate: AI has no legal moves → current player loses
-        const winSide = current.turn === 'red' ? 'black' : 'red';
-        const winStatus = winSide === 'red' ? 'red_win' : 'black_win';
-        setGameState({ ...current, status: winStatus });
-        setAiThinking(false);
-        return;
-      }
 
-      // Save undo entry before AI move
-      const undoEntry: UndoEntry = {
-        gameState: current,
-        past: [...pastRef.current],
-        aiAnnotations: [...aiAnnotationsRef.current],
-        lastAiInfo: lastAiInfoRef.current,
-      };
-      setUndoStack(s => [...s, undoEntry]);
-      undoStackRef.current = [...undoStackRef.current, undoEntry];
+      abortController = new AbortController();
+      let engineResult: Awaited<ReturnType<typeof requestPikafishMove>> | null = null;
+      let engineError: Error | null = null;
 
-      const next = applyMove(current, r.move.from, r.move.to);
-      const ann: AiAnnotation = { score: r.score, reason: r.reason, moveIndex: current.history.length };
-      const nextAnns = [...aiAnnotationsRef.current, ann];
-      aiAnnotationsRef.current = nextAnns;
-      pastRef.current = [...pastRef.current, current];
-      setPast(p => [...p, current]);
-      setGameState(next);
-      setAiAnnotations(nextAnns);
-      setLastAiInfo({ text: moveText(r.move), score: r.score, reason: r.reason });
-      playBoardSoundFeedback({ captured: !!r.move.captured, check: isInCheck(next.board, next.turn) });
-      setAiThinking(false);
-    }, 400);
-    return () => clearTimeout(id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+      requestPikafishMove(current, { movetime: 800, signal: abortController.signal })
+        .then(result => {
+          engineResult = result;
+        })
+        .catch(error => {
+          engineError = error instanceof Error ? error : new Error(String(error));
+        })
+        .finally(() => {
+          if (cancelled || gameStateRef.current !== current || current.turn !== aiSide) return;
+
+          const fallback = recommendMoveFair(current);
+          const r = engineResult
+            ? (() => {
+                const converted = pikafishMoveToPosition(engineResult.bestMove);
+                return converted
+                  ? candidates.find(m => m.from.row === converted.from.row && m.from.col === converted.from.col && m.to.row === converted.to.row && m.to.col === converted.to.col)
+                  : null;
+              })()
+            : fallback.move;
+
+          if (!r) {
+            const winSide = current.turn === 'red' ? 'black' : 'red';
+            const winStatus = winSide === 'red' ? 'red_win' : 'black_win';
+            setGameState({ ...current, status: winStatus });
+            setAiThinking(false);
+            return;
+          }
+
+          const undoEntry: UndoEntry = {
+            gameState: current,
+            past: [...pastRef.current],
+            aiAnnotations: [...aiAnnotationsRef.current],
+            lastAiInfo: lastAiInfoRef.current,
+          };
+          setUndoStack(s => [...s, undoEntry]);
+          undoStackRef.current = [...undoStackRef.current, undoEntry];
+
+          const next = applyMove(current, r.from, r.to);
+          const score = engineResult?.score ?? fallback.score;
+          const reason = engineResult
+            ? [
+                'Pikafish UCI',
+                engineResult.depth != null ? `depth ${engineResult.depth}` : null,
+                engineResult.nodes != null ? `${engineResult.nodes.toLocaleString()} nodes` : null,
+                engineResult.mateIn != null ? `mate in ${Math.abs(engineResult.mateIn)}` : null,
+                engineError ? `fallback: ${engineError.message}` : null,
+              ].filter(Boolean).join(' · ')
+            : `簡易 AI 回退：${engineError?.message ?? '引擎無回應'}`;
+          const ann: AiAnnotation = { score, reason, moveIndex: current.history.length };
+          const nextAnns = [...aiAnnotationsRef.current, ann];
+          aiAnnotationsRef.current = nextAnns;
+          pastRef.current = [...pastRef.current, current];
+          setPast(p => [...p, current]);
+          setGameState(next);
+          setAiAnnotations(nextAnns);
+          setLastAiInfo({ text: moveText(r), score, reason });
+          playBoardSoundFeedback({ captured: !!r.captured, check: isInCheck(next.board, next.turn) });
+          setAiThinking(false);
+        });
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      abortController?.abort();
+      clearTimeout(id);
+    };
+
+    /* Original synchronous logic removed; async UCI handling above. */
   }, [gameState.turn, gameState.status, humanSide]);
 
   /* Endgame sound */
@@ -261,7 +305,7 @@ export function HumanVsAiPanel({ onHome, storage }: Props) {
             >執黑後手</button>
           </div>
           <p style={{ color: '#64748b', fontSize: 13, marginTop: 16 }}>
-            AI 使用公平資訊 recommendMoveFair()，無需後端。
+            AI 使用 Pikafish-jieqi_old UCI 引擎；開發與 preview 由本機橋接服務提供。
           </p>
         </div>
       </main>
