@@ -83,7 +83,7 @@ curl -X POST http://127.0.0.1:4173/api/pikafish-move \
 
 ```bash
 npm install -g pm2
-pm2 start npm --name pikafish-api -- run pikafish-server -- --host 127.0.0.1 --port 8787
+pm2 start server.js --name pikafish-api -- --host 127.0.0.1 --port 8787
 pm2 save
 ```
 

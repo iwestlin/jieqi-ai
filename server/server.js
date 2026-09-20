@@ -1,15 +1,29 @@
 'use strict';
 
 const http = require('node:http');
+const { createReadStream } = require('node:fs');
+const fs = require('node:fs/promises');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 
 const API_PATH = '/api/pikafish-move';
-const DEFAULT_ENGINE_PATH = path.resolve(__dirname, '../Pikafish-jieqi_old/src/PikaJieQi');
-const DEFAULT_HOST = process.env.PIKAFISH_HOST || process.env.HOST || '127.0.0.1';
+const DEFAULT_ENGINE_PATH = path.resolve(__dirname, 'PikaJieQi');
+const DEFAULT_HOST = process.env.PIKAFISH_HOST || process.env.HOST || '0.0.0.0';
 const DEFAULT_PORT = Number(process.env.PIKAFISH_PORT || process.env.PORT || 8787);
 const DEFAULT_RATE_LIMIT = Number(process.env.PIKAFISH_RATE_LIMIT || 60);
 const DEFAULT_RATE_INTERVAL_MS = Number(process.env.PIKAFISH_RATE_INTERVAL_MS || 60_000);
+const PUBLIC_DIR = path.resolve(__dirname, 'public');
+const MIME_TYPES = {
+  '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.ico': 'image/x-icon',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.txt': 'text/plain; charset=utf-8',
+  '.wasm': 'application/wasm',
+};
 
 class UciEngine {
   constructor(enginePath = process.env.PIKAFISH_ENGINE || DEFAULT_ENGINE_PATH) {
@@ -231,6 +245,62 @@ function sendJson(res, statusCode, body) {
   res.end(JSON.stringify(body));
 }
 
+async function sendStaticFile(res, filePath, method) {
+  const stats = await fs.stat(filePath);
+  if (!stats.isFile()) throw new Error('Not found');
+
+  res.statusCode = 200;
+  res.setHeader('Content-Type', MIME_TYPES[path.extname(filePath).toLowerCase()] || 'application/octet-stream');
+  res.setHeader('Content-Length', stats.size);
+  res.setHeader('Cache-Control', 'no-cache');
+
+  if (method === 'HEAD') {
+    res.end();
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    const stream = createReadStream(filePath);
+
+    stream.on('error', reject);
+    res.on('finish', resolve);
+    stream.pipe(res);
+  });
+}
+
+async function serveStatic(req, res, pathname) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(pathname);
+  } catch {
+    sendJson(res, 400, { error: 'Invalid path' });
+    return true;
+  }
+
+  const relativePath = decodedPath === '/' ? 'index.html' : decodedPath.slice(1);
+  const filePath = path.normalize(path.join(PUBLIC_DIR, relativePath));
+  if (filePath !== PUBLIC_DIR && !filePath.startsWith(`${PUBLIC_DIR}${path.sep}`)) {
+    sendJson(res, 403, { error: 'Forbidden' });
+    return true;
+  }
+
+  try {
+    await sendStaticFile(res, filePath, req.method);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      sendJson(res, 404, { error: 'Not found' });
+    } else if (error.code === 'EISDIR' || error.message === 'Not found') {
+      sendJson(res, 404, { error: 'Not found' });
+    } else {
+      sendJson(res, 500, { error: 'Unable to read file' });
+    }
+  }
+
+  return true;
+}
+
 function getRequestIp(req) {
   const realIpValues = req.headers['x-real-ip'];
   if (Array.isArray(realIpValues) && realIpValues.length) {
@@ -249,6 +319,15 @@ function checkRateLimit(req, res, rateLimiter) {
   res.setHeader('Retry-After', Math.ceil(rateLimiter.intervalMs / 1000));
   sendJson(res, 429, { error: 'Too many requests' });
   return false;
+}
+
+function logRequest(req, res, pathname, startedAt) {
+  res.once('finish', () => {
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+    console.info(
+      `[request] ${req.method} ${pathname} ${res.statusCode} ${elapsedMs.toFixed(1)}ms ${getRequestIp(req)}`,
+    );
+  });
 }
 
 function createPikafishService(options = {}) {
@@ -287,17 +366,18 @@ function createPikafishServer(options = {}) {
   const service = createPikafishService(options);
   const { rateLimiter } = service;
   const server = http.createServer(async (req, res) => {
-    applyCors(res);
     const pathname = new URL(req.url || '/', 'http://localhost').pathname;
+    logRequest(req, res, pathname, process.hrtime.bigint());
 
     if (req.method === 'GET' && pathname === '/healthz') {
+      applyCors(res);
       if (!checkRateLimit(req, res, rateLimiter)) return;
       sendJson(res, 200, { ok: true });
       return;
     }
 
     if (pathname !== API_PATH) {
-      sendJson(res, 404, { error: 'Not found' });
+      await serveStatic(req, res, pathname);
       return;
     }
 
@@ -349,7 +429,7 @@ if (require.main === module) {
   const options = parseArgs(process.argv.slice(2));
   startPikafishServer(options)
     .then(({ server, service, host, port }) => {
-      console.log(`[Pikafish API] listening on http://${host}:${port}${API_PATH}`);
+      console.log(`[Pikafish API] listening on http://${host}:${port}`);
       const shutdown = () => {
         service.engine.kill();
         server.close(() => process.exit(0));
@@ -371,4 +451,6 @@ module.exports = {
   createPikafishService,
   createPikafishServer,
   startPikafishServer,
+  serveStatic,
+  logRequest,
 };
