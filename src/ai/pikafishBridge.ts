@@ -1,4 +1,5 @@
 import type { GameState, PieceType, Position, Side } from '../types/chess';
+import { PikafishEngine } from './pikafishEngine';
 
 const initialPool: Record<Side, Record<PieceType, number>> = {
   red: {
@@ -136,24 +137,104 @@ export type PikafishSearchResult = {
   nodes?: number;
 };
 
+let engine: PikafishEngine | null = null;
+let engineReady: Promise<void> | null = null;
+let searchQueue: Promise<unknown> = Promise.resolve();
+
+function getEngine(): PikafishEngine {
+  if (!engine) {
+    const pikafish = new PikafishEngine();
+    engine = pikafish;
+    engineReady = pikafish.start({ threads: 1, hashMB: 48 }).then(() => {
+      pikafish.send('uci');
+      return pikafish.waitFor(message => message.line?.includes('uciok') ?? false);
+    }).then(() => {
+      pikafish.send('isready');
+      return pikafish.waitFor(message => message.line === 'readyok');
+    }).then(() => undefined).catch(error => {
+      engine = null;
+      engineReady = null;
+      console.error('[Pikafish] engine initialization failed:', error);
+      throw error;
+    });
+  }
+  return engine;
+}
+
+function abortError(): Error {
+  const error = new Error('The operation was aborted.');
+  error.name = 'AbortError';
+  return error;
+}
+
 export async function requestPikafishMove(
   state: GameState,
   options: { movetime?: number; signal?: AbortSignal } = {},
 ): Promise<PikafishSearchResult> {
-  const response = await fetch('/api/pikafish-move', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      fen: gameStateToPikafishFen(state),
-      movetime: options.movetime ?? 800,
-    }),
-    signal: options.signal,
+  const pikafish = getEngine();
+  const movetime = Math.min(Math.max(options.movetime ?? 800, 80), 10_000);
+  if (!engineReady) throw new Error('Pikafish engine is unavailable');
+  const previousQueue = searchQueue;
+
+  const search = (previousQueue ?? Promise.resolve()).then(async () => {
+    if (options.signal?.aborted) throw abortError();
+    await engineReady;
+
+    const result: PikafishSearchResult = { bestMove: '' };
+    const unsubscribe = pikafish.onOutput((message: { type: string; line?: string; error?: string }) => {
+      if (message.type !== 'output') return;
+      const line = message.line?.trim();
+      if (!line) return;
+      const scoreMatch = line.match(/^info .*?\bscore cp (-?\d+)/);
+      const mateMatch = line.match(/^info .*?\bscore mate (-?\d+)/);
+      const depthMatch = line.match(/^info .*?\bdepth (\d+)/);
+      const nodesMatch = line.match(/^info .*?\bnodes (\d+)/);
+
+      if (scoreMatch) {
+        result.score = Number(scoreMatch[1]);
+        result.mateIn = undefined;
+      }
+      if (mateMatch) {
+        result.mateIn = Number(mateMatch[1]);
+        result.score = Number(mateMatch[1]) > 0 ? 10_000 : -10_000;
+      }
+      if (depthMatch) result.depth = Number(depthMatch[1]);
+      if (nodesMatch) result.nodes = Number(nodesMatch[1]);
+    });
+
+    try {
+      pikafish.send(`position fen ${gameStateToPikafishFen(state)}`);
+      pikafish.send(`go movetime ${movetime}`);
+      const bestMoveMessage = await Promise.race([
+        pikafish.waitFor(message => message.line?.startsWith('bestmove ') ?? false, movetime + 15_000),
+        new Promise<never>((_resolve, reject) => {
+          options.signal?.addEventListener('abort', () => {
+            pikafish.stop();
+            reject(abortError());
+          }, { once: true });
+        }),
+      ]);
+
+      result.bestMove = bestMoveMessage.line?.split(/\s+/)[1] ?? '';
+      if (!result.bestMove || result.bestMove === '(none)') {
+        throw new Error('Pikafish found no legal move');
+      }
+      return result;
+    } catch (error) {
+      pikafish.stop();
+      await pikafish.waitFor(
+        message => message.line?.startsWith('bestmove ') ?? false,
+        3_000,
+      ).catch(() => undefined);
+      throw error;
+    } finally {
+      unsubscribe();
+    }
   });
 
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: response.statusText }) as { error?: string });
-    throw new Error(body.error ?? `Pikafish API error ${response.status}`);
-  }
-
-  return await response.json() as PikafishSearchResult;
+  searchQueue = search.then(
+    () => undefined,
+    () => undefined,
+  );
+  return search;
 }

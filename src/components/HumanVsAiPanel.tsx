@@ -305,7 +305,7 @@ export function HumanVsAiPanel({ onHome, storage }: Props) {
             >執黑後手</button>
           </div>
           <p style={{ color: '#64748b', fontSize: 13, marginTop: 16 }}>
-            AI 使用 Pikafish-jieqi_old UCI 引擎；開發與 preview 由本機橋接服務提供。
+            AI 使用瀏覽器端 Pikafish WebAssembly 引擎，無需本機橋接服務。
           </p>
         </div>
       </main>
